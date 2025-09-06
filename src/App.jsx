@@ -1051,7 +1051,7 @@ function ParticipantReportView({ course, participant, participants, onChangePart
             labelMap = DOMAIN_LABEL_IMNCI;
         } else if (course.course_type === 'ETAT') {
             labelMap = ETAT_DOMAIN_LABEL;
-        } else if (course.course_type === 'EENC') {
+        } else if (course.course.type === 'EENC') {
             labelMap = { ...EENC_DOMAIN_LABEL_BREATHING, ...EENC_DOMAIN_LABEL_NOT_BREATHING };
         }
 
@@ -2444,15 +2444,20 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
     const [loading, setLoading] = useState(true);
     const combinedChartRef = useRef(null);
     const imciSubcoursePieRef = useRef(null);
+    const instructedCoursesData = useRef(null);
+    const directedCoursesData = useRef(null);
 
-    useEffect(() => {
-        if (allCourses.length > 0) {
-            setLoading(false);
-        }
-    }, [allCourses]);
-
+    // All hooks must be at the top level of the component, before any conditional returns
     const { directedCourses, facilitatedCourses, totalDays, combinedChartData, imciSubcourseData } = useMemo(() => {
-        if (!facilitator) return { directedCourses: [], facilitatedCourses: [], totalDays: 0, combinedChartData: {}, imciSubcourseData: {} };
+        if (!facilitator) {
+            return {
+                directedCourses: [],
+                facilitatedCourses: [],
+                totalDays: 0,
+                combinedChartData: { labels: [], datasets: [] },
+                imciSubcourseData: null
+            };
+        }
 
         const directed = allCourses.filter(c => c.director === facilitator.name);
         const facilitated = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(facilitator.name));
@@ -2489,13 +2494,14 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
             }]
         };
 
-        const imciSubcourseData = {
+        const hasSubcourseData = Object.values(subcourseCounts).some(count => count > 0);
+        const imciSubcourseData = hasSubcourseData ? {
             labels: Object.keys(subcourseCounts),
             datasets: [{
                 data: Object.values(subcourseCounts),
                 backgroundColor: ['#f97316', '#ef4444', '#f59e0b', '#84cc16', '#06b6d4'],
             }]
-        };
+        } : null;
 
         return {
             directedCourses: directed,
@@ -2505,6 +2511,34 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
             imciSubcourseData
         };
     }, [facilitator, allCourses]);
+
+    useEffect(() => {
+        if (allCourses.length > 0) {
+            setLoading(false);
+        }
+    }, [allCourses]);
+
+    const courseSummary = useMemo(() => {
+        const summary = {};
+        allCourses.forEach(course => {
+            const courseType = course.course_type;
+            summary[courseType] = summary[courseType] || {
+                directed: 0,
+                instructed: 0,
+                daysDirected: 0,
+                daysInstructed: 0,
+            };
+            if (course.director === facilitator.name) {
+                summary[courseType].directed++;
+                summary[courseType].daysDirected += (course.course_duration || 0);
+            }
+            if (Array.isArray(course.facilitators) && course.facilitators.includes(facilitator.name)) {
+                summary[courseType].instructed++;
+                summary[courseType].daysInstructed += (course.course_duration || 0);
+            }
+        });
+        return Object.entries(summary);
+    }, [allCourses, facilitator]);
 
     const generateFacilitatorPdf = () => {
         const doc = new jsPDF();
@@ -2595,15 +2629,15 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
         doc.save(fileName);
     };
 
-    if (loading) return <Card><Spinner /></Card>;
-    if (!facilitator) return <Card><EmptyState message="Facilitator not found." /></Card>;
+    // Conditional returns are now correctly placed inside the function
+    if (loading) {
+        return <Card><Spinner /></Card>;
+    }
 
-    const chartOptions = (title) => ({
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, title: { display: true, text: title } },
-        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
-    });
-
+    if (!facilitator) {
+        return <Card><EmptyState message="Facilitator not found." /></Card>;
+    }
+    
     return (
         <div className="grid gap-6">
             <PageHeader title="Facilitator Report" subtitle={facilitator.name} actions={<>
@@ -2622,23 +2656,34 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
                         <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Courses</td><td className="p-2">{(Array.isArray(facilitator.courses) ? facilitator.courses : []).join(', ')}</td></tr>
                         <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Course Director</td><td className="p-2">{facilitator.directorCourse === 'Yes' ? `Yes (${facilitator.directorCourseDate || 'N/A'})` : 'No'}</td></tr>
                         <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Clinical Instructor</td><td className="p-2">{facilitator.isClinicalInstructor || 'No'}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Team Leader</td><td className="p-2">{facilitator.teamLeaderCourse === 'Yes' ? `Yes (${facilitator.teamLeaderCourseDate || 'N/A'})` : 'No'}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Follow-up Supervisor</td><td className="p-2">{facilitator.followUpCourse === 'Yes' ? `Yes (${facilitator.followUpCourseDate || 'N/A'})` : 'No'}</td></tr>
                     </tbody></table>
                 </div>
             </Card>
 
             <Card>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6">
-                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Courses Directed</div><div className="text-3xl font-bold text-sky-700">{directedCourses.length}</div></div>
-                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Courses Facilitated</div><div className="text-3xl font-bold text-sky-700">{facilitatedCourses.length}</div></div>
-                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Total Days of Training</div><div className="text-3xl font-bold text-sky-700">{totalDays}</div></div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-6 h-64">
-                    <Bar ref={combinedChartRef} options={{ ...chartOptions('Courses by Type'), stacked: false }} data={combinedChartData} />
-                    {facilitator.courses?.includes('IMNCI') && Object.keys(imciSubcourseData.labels || {}).length > 0 &&
-                        <Pie ref={imciSubcoursePieRef} options={chartOptions('IMNCI Sub-course Distribution')} data={imciSubcourseData} />
-                    }
-                </div>
+                <h3 className="text-xl font-bold mb-4">Course Involvement Summary</h3>
+                <Table headers={["Course Type", "Instructed", "Directed", "Total Days"]}>
+                    {courseSummary.map(([type, data]) => (
+                        <tr key={type}>
+                            <td className="p-2 border">{type}</td>
+                            <td className="p-2 border text-center">{data.instructed}</td>
+                            <td className="p-2 border text-center">{data.directed}</td>
+                            <td className="p-2 border text-center">{data.daysInstructed + data.daysDirected}</td>
+                        </tr>
+                    ))}
+                </Table>
             </Card>
+
+            {imciSubcourseData && (
+                <Card>
+                    <h3 className="text-xl font-bold mb-4">IMNCI Sub-course Distribution</h3>
+                    <div className="h-64 flex justify-center">
+                        <Pie data={imciSubcourseData} options={{ responsive: true, maintainAspectRatio: false }} />
+                    </div>
+                </Card>
+            )}
 
             <div className="grid md:grid-cols-2 gap-6">
                 <Card><h3 className="text-xl font-bold mb-4">Directed Courses</h3><Table headers={["Course", "Date", "Location"]}>{directedCourses.length === 0 ? <EmptyState message="No courses directed." /> : directedCourses.map(c => (<tr key={c.id}><td className="p-2 border">{c.course_type}</td><td className="p-2 border">{c.start_date}</td><td className="p-2 border">{c.state}</td></tr>))}</Table></Card>
@@ -2649,174 +2694,227 @@ function FacilitatorReportView({ facilitator, allCourses, onBack }) {
 }
 
 function FacilitatorComparisonView({ facilitators, allCourses, onBack }) {
-    const [viewMode, setViewMode] = useState('table');
     const [courseFilter, setCourseFilter] = useState('All');
-    const [imciSubcourseFilter, setImciSubcourseFilter] = useState('All');
+    const [stateFilter, setStateFilter] = useState('All');
+    const [localityFilter, setLocalityFilter] = useState('All');
     const [roleFilter, setRoleFilter] = useState('All');
-    const [additionalRoleFilter, setAdditionalRoleFilter] = useState('All');
-    const chartRef = useRef(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const filteredFacilitators = useMemo(() => {
-        return (Array.isArray(facilitators) ? facilitators : []).filter(f => {
-            const courses = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name));
-
-            // Role filter
-            if (roleFilter === 'Facilitator') {
-                const isFacilitator = courses.some(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name));
-                const isDirectorOrClinical = f.directorCourse === 'Yes' || f.isClinicalInstructor === 'Yes';
-                if (!isFacilitator || isDirectorOrClinical) return false;
-            } else if (roleFilter === 'Course Director' && f.directorCourse !== 'Yes') return false;
-            else if (roleFilter === 'Clinical Instructor' && f.isClinicalInstructor !== 'Yes') return false;
-
-            // Additional Role filter
-            if (additionalRoleFilter === 'Team Leader' && f.teamLeaderCourse !== 'Yes') return false;
-            else if (additionalRoleFilter === 'Follow-up' && f.followUpCourse !== 'Yes') return false;
-
-            // Course filter
-            if (courseFilter !== 'All') {
-                const hasCourse = courses.some(c => c.course_type === courseFilter);
-                if (!hasCourse) return false;
-            }
-            if (imciSubcourseFilter !== 'All') {
-                const hasSubcourse = courses.some(c => Array.isArray(c.facilitatorAssignments) && c.facilitatorAssignments.some(fa => fa.name === f.name && fa.imci_sub_type === imciSubcourseFilter));
-                if (!hasSubcourse) return false;
-            }
-
-            return true;
+        return facilitators.filter(f => {
+            const matchesSearch = searchQuery === '' || f.name.toLowerCase().includes(searchQuery.toLowerCase());
+            const matchesCourse = courseFilter === 'All' || (f.courses && f.courses.includes(courseFilter));
+            const matchesState = stateFilter === 'All' || f.currentState === stateFilter;
+            const matchesLocality = localityFilter === 'All' || f.currentLocality === localityFilter;
+            const matchesRole = roleFilter === 'All' || f[roleFilter] === 'Yes';
+            return matchesSearch && matchesCourse && matchesState && matchesLocality && matchesRole;
         });
-    }, [facilitators, allCourses, courseFilter, imciSubcourseFilter, roleFilter, additionalRoleFilter]);
+    }, [facilitators, courseFilter, stateFilter, localityFilter, roleFilter, searchQuery]);
 
-    const comparisonData = useMemo(() => {
-        return filteredFacilitators.map(f => {
-            const directed = allCourses.filter(c => c.director === f.name && (courseFilter === 'All' || c.course_type === courseFilter));
-            const facilitated = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name) && (courseFilter === 'All' || c.course_type === courseFilter));
-            const allInvolvedCourses = [...new Set([...directed, ...facilitated])];
-            const totalDays = allInvolvedCourses.reduce((sum, c) => sum + (c.course_duration || 0), 0);
-            
-            return {
-                id: f.id, name: f.name,
-                directedCount: directed.length,
-                facilitatedCount: facilitated.length,
-                totalDays: totalDays,
-                state: f.currentState || 'N/A',
-                locality: f.currentLocality || 'N/A',
-                phone: f.phone || 'N/A',
-            };
-        }).sort((a, b) => b.totalDays - a.totalDays);
-    }, [filteredFacilitators, allCourses, courseFilter]);
-
-    const top10ChartData = useMemo(() => {
-        const top10 = comparisonData.slice(0, 10);
+    const kpiData = useMemo(() => {
+        const totalFacilitators = filteredFacilitators.length;
+        const directors = filteredFacilitators.filter(f => f.directorCourse === 'Yes').length;
+        const clinicalInstructors = filteredFacilitators.filter(f => f.isClinicalInstructor === 'Yes').length;
+        const teamLeaders = filteredFacilitators.filter(f => f.teamLeaderCourse === 'Yes').length;
+        const followUpSupervisors = filteredFacilitators.filter(f => f.followUpCourse === 'Yes').length;
+        
         return {
-            labels: top10.map(f => f.name),
-            datasets: [{
-                label: 'Total Training Days',
-                data: top10.map(f => f.totalDays),
-                backgroundColor: '#0ea5e9'
-            }]
+            totalFacilitators,
+            directors,
+            clinicalInstructors,
+            teamLeaders,
+            followUpSupervisors
         };
-    }, [comparisonData]);
+    }, [filteredFacilitators]);
 
-    const handleExportPdf = () => {
-        if (viewMode === 'table') {
-            const doc = new jsPDF('landscape');
-            const title = `Facilitator Comparison Report (Table View)`;
-            doc.text(title, 14, 15);
-    
-            const head = [['Facilitator', 'State', 'Locality', 'Phone', 'Courses Directed', 'Courses Facilitated', 'Total Days']];
-            const body = comparisonData.map(f => [
-                f.name, f.state, f.locality, f.phone,
-                f.directedCount, f.facilitatedCount, f.totalDays,
-            ]);
-    
-            autoTable(doc, { head, body, startY: 25 });
-            doc.save('Facilitator_Comparison_Table_Report.pdf');
-        } else { // chart view
-            const doc = new jsPDF('portrait');
-            const title = `Top 10 Facilitators by Training Days`;
-            doc.text(title, 14, 15);
-            
-            const chartImg = chartRef.current?.canvas.toDataURL('image/png');
-            if (chartImg) {
-                doc.addImage(chartImg, 'PNG', 14, 25, 180, 90);
-            }
-            doc.save('Facilitator_Comparison_Chart_Report.pdf');
+    const locationData = useMemo(() => {
+        const data = {};
+        COURSE_TYPES_FACILITATOR.forEach(type => {
+            data[type] = {
+                insideSudan: 0,
+                outsideSudan: 0
+            };
+        });
+
+        filteredFacilitators.forEach(f => {
+            f.courses?.forEach(courseType => {
+                if (data[courseType]) {
+                    if (f.currentState === "Out of Sudan") {
+                        data[courseType].outsideSudan++;
+                    } else {
+                        data[courseType].insideSudan++;
+                    }
+                }
+            });
+        });
+        return data;
+    }, [filteredFacilitators]);
+
+    const locationChartData = useMemo(() => {
+        const labels = Object.keys(locationData);
+        const insideSudan = Object.values(locationData).map(d => d.insideSudan);
+        const outsideSudan = Object.values(locationData).map(d => d.outsideSudan);
+        return {
+            labels,
+            datasets: [
+                {
+                    label: 'In Sudan',
+                    data: insideSudan,
+                    backgroundColor: '#10b981'
+                },
+                {
+                    label: 'Outside Sudan',
+                    data: outsideSudan,
+                    backgroundColor: '#f97316'
+                }
+            ]
+        };
+    }, [locationData]);
+
+    const chartOptions = {
+        responsive: true,
+        plugins: {
+            legend: { position: 'top' },
+            title: { display: true, text: 'Facilitator Availability by Course and Location' }
+        },
+        scales: {
+            x: { stacked: true },
+            y: { stacked: true, ticks: { stepSize: 1 } }
         }
     };
+
+    const facilitatorHeaders = [
+        "Name", "Phone", "Email", "IMNCI Director?", "Clinical Instructor?", 
+        "Team Leader?", "Follow-up?", "Courses Instructed", "Courses Directed"
+    ];
+
+    const facilitatorData = useMemo(() => {
+        return filteredFacilitators.map(f => {
+            const instructed = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name)).length;
+            const directed = allCourses.filter(c => c.director === f.name).length;
+            const hasFollowUp = f.followUpCourse === 'Yes' || f.followUpCourse === 'yes' ? 'Yes' : 'No';
+            const hasTeamLeader = f.teamLeaderCourse === 'Yes' || f.teamLeaderCourse === 'yes' ? 'Yes' : 'No';
+            const isDirector = f.directorCourse === 'Yes' || f.directorCourse === 'yes' ? 'Yes' : 'No';
+            const isClinical = f.isClinicalInstructor === 'Yes' || f.isClinicalInstructor === 'yes' ? 'Yes' : 'No';
+    
+            return [
+                f.name,
+                f.phone,
+                f.email || 'N/A',
+                isDirector,
+                isClinical,
+                hasTeamLeader,
+                hasFollowUp,
+                instructed,
+                directed
+            ];
+        });
+    }, [filteredFacilitators, allCourses]);
+
+    const localitiesInSelectedState = useMemo(() => {
+        return stateFilter === 'All' ? [] : STATE_LOCALITIES[stateFilter] || [];
+    }, [stateFilter]);
 
     return (
         <Card>
             <PageHeader
-                title="Facilitator Comparison"
-                actions={<>
-                    <Button onClick={handleExportPdf} variant="secondary"><PdfIcon /> Export as PDF</Button>
-                    <Button onClick={onBack}>Back to List</Button>
-                </>}
+                title="Facilitator Comparison Report"
+                actions={<Button onClick={onBack}>Back to List</Button>}
             />
-            <div className="flex flex-wrap gap-3 mb-4">
-                <Button variant={viewMode === 'table' ? 'primary' : 'secondary'} onClick={() => setViewMode('table')}>Table View</Button>
-                <Button variant={viewMode === 'chart' ? 'primary' : 'secondary'} onClick={() => setViewMode('chart')}>Chart View</Button>
+            
+            {/* KPI Section */}
+            <h3 className="text-xl font-bold mb-4">Key Performance Indicators (KPIs)</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 text-center mb-6">
+                <div className="p-4 bg-gray-100 rounded-lg">
+                    <div className="text-sm text-gray-600">Total Facilitators</div>
+                    <div className="text-3xl font-bold text-sky-700">{kpiData.totalFacilitators}</div>
+                </div>
+                <div className="p-4 bg-gray-100 rounded-lg">
+                    <div className="text-sm text-gray-600">Course Directors</div>
+                    <div className="text-3xl font-bold text-sky-700">{kpiData.directors}</div>
+                </div>
+                <div className="p-4 bg-gray-100 rounded-lg">
+                    <div className="text-sm text-gray-600">Clinical Instructors</div>
+                    <div className="text-3xl font-bold text-sky-700">{kpiData.clinicalInstructors}</div>
+                </div>
+                <div className="p-4 bg-gray-100 rounded-lg">
+                    <div className="text-sm text-gray-600">Team Leaders</div>
+                    <div className="text-3xl font-bold text-sky-700">{kpiData.teamLeaders}</div>
+                </div>
+                <div className="p-4 bg-gray-100 rounded-lg">
+                    <div className="text-sm text-gray-600">Follow-up Supervisors</div>
+                    <div className="text-3xl font-bold text-sky-700">{kpiData.followUpSupervisors}</div>
+                </div>
             </div>
+
+            {/* Filters Section */}
+            <h3 className="text-xl font-bold mb-4">Filters</h3>
             <div className="flex flex-wrap gap-4 items-center justify-start p-4 bg-gray-50 rounded-md mb-6">
+                <FormGroup label="Search by Name"><Input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search name..." /></FormGroup>
                 <FormGroup label="Filter by Course">
-                    <Select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}>
+                    <Select value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)}>
                         <option value="All">All Courses</option>
                         {COURSE_TYPES_FACILITATOR.map(c => <option key={c} value={c}>{c}</option>)}
                     </Select>
                 </FormGroup>
-                {courseFilter === 'IMNCI' && (
-                    <FormGroup label="Filter by IMCI Sub-course">
-                        <Select value={imciSubcourseFilter} onChange={e => setImciSubcourseFilter(e.target.value)}>
-                            <option value="All">All Sub-courses</option>
-                            {IMNCI_SUBCOURSE_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </Select>
-                    </FormGroup>
-                )}
-                <FormGroup label="Filter by Role">
-                    <Select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
-                        <option value="All">All Roles</option>
-                        <option value="Facilitator">Facilitator</option>
-                        <option value="Course Director">Course Director</option>
-                        <option value="Clinical Instructor">Clinical Instructor</option>
+                <FormGroup label="Filter by State">
+                    <Select value={stateFilter} onChange={(e) => { setStateFilter(e.target.value); setLocalityFilter('All'); }}>
+                        <option value="All">All States</option>
+                        {Object.keys(STATE_LOCALITIES).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                        <option value="Out of Sudan">Out of Sudan</option>
                     </Select>
                 </FormGroup>
-                <FormGroup label="Filter by Additional Roles">
-                    <Select value={additionalRoleFilter} onChange={e => setAdditionalRoleFilter(e.target.value)}>
+                <FormGroup label="Filter by Locality">
+                    <Select value={localityFilter} onChange={(e) => setLocalityFilter(e.target.value)} disabled={stateFilter === 'All' || stateFilter === 'Out of Sudan'}>
+                        <option value="All">All Localities</option>
+                        {localitiesInSelectedState.map(l => <option key={l} value={l}>{l}</option>)}
+                    </Select>
+                </FormGroup>
+                <FormGroup label="Filter by Role">
+                    <Select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
                         <option value="All">All Roles</option>
-                        <option value="Team Leader">Team Leader</option>
-                        <option value="Follow-up">Follow-up after training</option>
+                        <option value="directorCourse">IMNCI Director</option>
+                        <option value="isClinicalInstructor">Clinical Instructor</option>
+                        <option value="teamLeaderCourse">Team Leader</option>
+                        <option value="followUpCourse">Follow-up Supervisor</option>
                     </Select>
                 </FormGroup>
             </div>
             
-            {viewMode === 'table' && (
-                <Table headers={['Facilitator', 'State', 'Locality', 'Phone', 'Courses Directed', 'Courses Facilitated', 'Total Days']}>
-                    {comparisonData.length === 0 ? <EmptyState message="No data to display." /> :
-                        comparisonData.map(f => (
-                            <tr key={f.id} className="hover:bg-gray-50 text-center">
-                                <td className="p-2 border text-left">{f.name}</td>
-                                <td className="p-2 border">{f.state}</td>
-                                <td className="p-2 border">{f.locality}</td>
-                                <td className="p-2 border">{f.phone}</td>
-                                <td className="p-2 border">{f.directedCount}</td>
-                                <td className="p-2 border">{f.facilitatedCount}</td>
-                                <td className="p-2 border font-bold">{f.totalDays}</td>
+            {/* Facilitator Availability Table & Chart */}
+            <div className="grid md:grid-cols-2 gap-6 mb-6">
+                <Card>
+                    <h3 className="text-xl font-bold mb-4">Facilitator Availability</h3>
+                    <Table headers={["Course", "In Sudan", "Outside Sudan"]}>
+                        {COURSE_TYPES_FACILITATOR.map(course => (
+                            <tr key={course}>
+                                <td className="p-2 border">{course}</td>
+                                <td className="p-2 border text-center">{locationData[course].insideSudan}</td>
+                                <td className="p-2 border text-center">{locationData[course].outsideSudan}</td>
+                            </tr>
+                        ))}
+                    </Table>
+                </Card>
+                <Card>
+                    <Bar data={locationChartData} options={chartOptions} />
+                </Card>
+            </div>
+
+            {/* Facilitator Information Table */}
+            <Card>
+                <h3 className="text-xl font-bold mb-4">Facilitator Information Table</h3>
+                <Table headers={facilitatorHeaders}>
+                    {facilitatorData.length === 0 ? <EmptyState message="No data to display." colSpan={facilitatorHeaders.length} /> :
+                        facilitatorData.map((row, index) => (
+                            <tr key={index} className="hover:bg-gray-50 text-center">
+                                {row.map((cell, i) => (
+                                    <td key={i} className="p-2 border text-left">{cell}</td>
+                                ))}
                             </tr>
                         ))
                     }
                 </Table>
-            )}
-
-            {viewMode === 'chart' && (
-                <div className="grid md:grid-cols-1 gap-6 mb-6">
-                    <Card>
-                        <h3 className="text-xl font-bold mb-4">Top 10 Facilitators (by training days)</h3>
-                        <div className="h-64">
-                            <Bar ref={chartRef} options={{ responsive: true, maintainAspectRatio: false }} data={top10ChartData} />
-                        </div>
-                    </Card>
-                </div>
-            )}
+            </Card>
         </Card>
     );
 }
