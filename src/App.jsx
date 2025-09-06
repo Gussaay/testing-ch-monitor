@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-// +++ Import Chart.js for graphing +++
-import { Bar } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import { Bar, Pie } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
 
-// +++ Register Chart.js components +++
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
-
-// +++ Import all data functions from your new data.js file +++
+// Import all data functions
 import {
     listCoursesByType,
     upsertCourse,
@@ -21,15 +18,19 @@ import {
     listCasesForParticipant,
     upsertCaseAndObservations,
     deleteCaseAndObservations,
-    listAllDataForCourse
+    listAllDataForCourse,
+    upsertFacilitator,
+    listFacilitators,
+    deleteFacilitator,
+    listAllCourses
 } from './data.js';
+
 
 /** =============================================================================
  * National Child Health Program - Courses Monitoring System (Firebase Version)
  * ============================================================================ */
 
 // ----------------------------- CONSTANTS ------------------------------
-// +++ UPDATED STATES AND LOCALITIES BASED ON PROVIDED JSON +++
 const STATE_LOCALITIES = {
     "Khartoum": ["Khartoum", "Omdurman", "Khartoum North (Bahri)", "Jebel Awliya", "Sharq an-Nil", "Karari", "Um Badda"],
     "Gezira": ["Wad Madani Al Kubra", "South Al Gazira", "North Al Gazira", "East Al Gazira", "Um Al Gura", "Al Hasahisa", "Al Kamlin", "Al Managil", "24 Al-Qurashi"],
@@ -50,96 +51,12 @@ const STATE_LOCALITIES = {
     "Central Darfur": ["Zalingei", "Nertiti", "Rokoro", "Bindisi", "Azum", "Wadi Salih", "Mukjar", "Umm Dukhun", "Garsila"],
     "East Darfur": ["Ed Daein", "Abu Karinka", "El Ferdous", "Assalaya", "Bahr el Arab", "Yassin", "Abu Jabra", "Keleikail Abu Salama", "Adila"]
 };
+const COURSE_TYPES_FACILITATOR = ["IMNCI", "ETAT", "EENC", "IPC"];
+const IMNCI_SUBCOURSE_TYPES = ["Standard 7 days course", "Refreshment course", "IMNCI in humanitarian setting", "online IMCI course", "preservice Course"];
 
 // EENC SKILLS UPDATED WITH SCORING TYPE
-const SKILLS_EENC_BREATHING = {
-    pre_birth: [
-        { text: "Checked room temperature and turned off fans" },
-        { text: "Told the mother (and her support person) what is going to be done" },
-        { text: "Washed hands (first of two hand washings)" },
-        { text: "Placed dry cloth on mother's abdomen" },
-        { text: "Prepared the newborn resuscitation area" },
-        { text: "Checked that bag and mask are functional" },
-        { text: "Washed hands (second of two hand washings)" },
-        { text: "Put on two pairs of clean gloves" },
-        { text: "Put forceps, cord clamp in easy-to-use order" }
-    ],
-    eenc: [
-        { text: "Call out time of birth" },
-        { text: "Start Drying within 5 seconds of birth" },
-        { text: "Dry the baby thoroughly" },
-        { text: "Stimulate baby by gently rubbing" },
-        { text: "Suction only if airway blocked" },
-        { text: "Remove the wet cloth" },
-        { text: "Put baby in direct skin-to-skin contact" },
-        { text: "Cover baby’s body with dry cloth and the head with a hat" }
-    ],
-    oxytocin: [
-        { text: "Check for a second baby" },
-        { text: "Give oxytocin to mother within 1 minute of delivery" }
-    ],
-    cord_clamp: [
-        { text: "Removed outer pair of gloves" },
-        { text: "Check cord pulsations, clamp after cord pulsations stopped" },
-        { text: "Place clamp at 2 cm, forceps at 5 cm" }
-    ],
-    placenta: [
-        { text: "Delivered placenta" },
-        { text: "Counsel mother on feeding cues" }
-    ]
-};
-const SKILLS_EENC_NOT_BREATHING = {
-    pre_birth: [
-        { text: "Checked room temperature and turned off fans" },
-        { text: "Told the mother what is going to be done" },
-        { text: "Washed hands (first of two hand washings)" },
-        { text: "Placed dry cloth on mother's abdomen" },
-        { text: "Prepared the newborn resuscitation area" },
-        { text: "Checked that bag and mask are functional" },
-        { text: "Washed hands (second of two hand washings)" },
-        { text: "Put on two pairs of clean gloves" },
-        { text: "Put forceps, cord clamp in easy-to-use order" }
-    ],
-    eenc_initial: [
-        { text: "Called out time of birth" },
-        { text: "Started Drying within 5 seconds of birth" },
-        { text: "Dried the baby thoroughly" },
-        { text: "Stimulated baby by gently rubbing" },
-        { text: "Suction only if airway blocked" },
-        { text: "Removed the wet cloth" },
-        { text: "Put baby in direct skin-to-skin contact" },
-        { text: "Covered baby’s body with cloth and the head with a hat" }
-    ],
-    if_not_breathing: [
-        { text: "Called for help" },
-        { text: "Removed outer pair of gloves" },
-        { text: "Quickly clamped and cut cord" },
-        { text: "Moved baby to resuscitation area" },
-        { text: "Covered baby quickly during and after transfer" }
-    ],
-    resuscitation: [
-        { text: "Positioned the head correctly to open airways" },
-        { text: "Applied face mask firmly" },
-        { text: "Gain chest rise within < 1 min of birth" },
-        { text: "Squeezed bag to give 30–50 breaths per minute" },
-        { text: "If chest not rising: Reposition head, reposition mask, check airway, squeeze harder" }
-    ],
-    if_breathing_starts: [
-        { text: "Stop ventilation and monitor every 15 minutes" },
-        { text: "Return baby to skin-to-skin contact and cover baby" },
-        { text: "Counsel mother that baby is OK" }
-    ],
-    post_resuscitation: [
-        { text: "Check for a second baby" },
-        { text: "Give oxytocin to mother within 1 minute of delivery" },
-        { text: "Delivered placenta" },
-        { text: "Counsel mother on feeding cues" }
-    ],
-    if_not_breathing_after_10_min: [
-        { text: "If heart rate, continue ventilation, Refer and transport" },
-        { text: "If no heart rate, stop ventilation, provide emotional support" }
-    ]
-};
+const SKILLS_EENC_BREATHING = { pre_birth: [{ text: "Checked room temperature and turned off fans" }, { text: "Told the mother (and her support person) what is going to be done" }, { text: "Washed hands (first of two hand washings)" }, { text: "Placed dry cloth on mother's abdomen" }, { text: "Prepared the newborn resuscitation area" }, { text: "Checked that bag and mask are functional" }, { text: "Washed hands (second of two hand washings)" }, { text: "Put on two pairs of clean gloves" }, { text: "Put forceps, cord clamp in easy-to-use order" }], eenc: [{ text: "Call out time of birth" }, { text: "Start Drying within 5 seconds of birth" }, { text: "Dry the baby thoroughly" }, { text: "Stimulate baby by gently rubbing" }, { text: "Suction only if airway blocked" }, { text: "Remove the wet cloth" }, { text: "Put baby in direct skin-to-skin contact" }, { text: "Cover baby’s body with dry cloth and the head with a hat" }], oxytocin: [{ text: "Check for a second baby" }, { text: "Give oxytocin to mother within 1 minute of delivery" }], cord_clamp: [{ text: "Removed outer pair of gloves" }, { text: "Check cord pulsations, clamp after cord pulsations stopped" }, { text: "Place clamp at 2 cm, forceps at 5 cm" }], placenta: [{ text: "Delivered placenta" }, { text: "Counsel mother on feeding cues" }] };
+const SKILLS_EENC_NOT_BREATHING = { pre_birth: [{ text: "Checked room temperature and turned off fans" }, { text: "Told the mother what is going to be done" }, { text: "Washed hands (first of two hand washings)" }, { text: "Placed dry cloth on mother's abdomen" }, { text: "Prepared the newborn resuscitation area" }, { text: "Checked that bag and mask are functional" }, { text: "Washed hands (second of two hand washings)" }, { text: "Put on two pairs of clean gloves" }, { text: "Put forceps, cord clamp in easy-to-use order" }], eenc_initial: [{ text: "Called out time of birth" }, { text: "Started Drying within 5 seconds of birth" }, { text: "Dried the baby thoroughly" }, { text: "Stimulated baby by gently rubbing" }, { text: "Suction only if airway blocked" }, { text: "Removed the wet cloth" }, { text: "Put baby in direct skin-to-skin contact" }, { text: "Covered baby’s body with cloth and the head with a hat" }], if_not_breathing: [{ text: "Called for help" }, { text: "Removed outer pair of gloves" }, { text: "Quickly clamped and cut cord" }, { text: "Moved baby to resuscitation area" }, { text: "Covered baby quickly during and after transfer" }], resuscitation: [{ text: "Positioned the head correctly to open airways" }, { text: "Applied face mask firmly" }, { text: "Gain chest rise within < 1 min of birth" }, { text: "Squeezed bag to give 30–50 breaths per minute" }, { text: "If chest not rising: Reposition head, reposition mask, check airway, squeeze harder" }], if_breathing_starts: [{ text: "Stop ventilation and monitor every 15 minutes" }, { text: "Return baby to skin-to-skin contact and cover baby" }, { text: "Counsel mother that baby is OK" }], post_resuscitation: [{ text: "Check for a second baby" }, { text: "Give oxytocin to mother within 1 minute of delivery" }, { text: "Delivered placenta" }, { text: "Counsel mother on feeding cues" }], if_not_breathing_after_10_min: [{ text: "If heart rate, continue ventilation, Refer and transport" }, { text: "If no heart rate, stop ventilation, provide emotional support" }] };
 const EENC_DOMAIN_LABEL_BREATHING = { pre_birth: "Pre-birth preparations", eenc: "Early Essential Newborn Care", oxytocin: "Give Oxytocin to mother", cord_clamp: "Clamp the cord", placenta: "Deliver the placenta and counsel the mother" };
 const EENC_DOMAINS_BREATHING = Object.keys(SKILLS_EENC_BREATHING);
 const EENC_DOMAIN_LABEL_NOT_BREATHING = { pre_birth: "Pre-birth preparations", eenc_initial: "Initial EENC Steps (40 sec)", if_not_breathing: "If baby not crying or not breathing", resuscitation: "Resuscitation", if_breathing_starts: "If baby starts breathing well", post_resuscitation: "Post-resuscitation care", if_not_breathing_after_10_min: "If baby not breathing after 10 minutes" };
@@ -152,7 +69,6 @@ const CLASS_0_59D = { bacterial: ["Possible serious bacterial infection", "Local
 const DOMAINS_BY_AGE_IMNCI = { GE2M_LE5Y: ["danger", "respiratory", "diarrhoea", "fever_malaria", "ear", "malnutrition", "anaemia", "identify_treatment", "treatment_2_59m", "counsel"], LT2M: ["bacterial", "jaundice", "vyi_diarrhoea", "feeding", "identify_treatment", "treatment_0_59d"], };
 const DOMAIN_LABEL_IMNCI = { danger: "Danger signs", respiratory: "COUGH:", diarrhoea: "DIARRHOEA:", fever_malaria: "FEVER:", ear: "EAR:", malnutrition: "MALNUTRITION:", anaemia: "ANAEMIA:", identify_treatment: "IDENTIFY TREATMENT:", treatment_2_59m: "TREAT:", counsel: "COUNSEL:", bacterial: "BACTERIAL:", jaundice: "JAUNDICE:", vyi_diarrhoea: "DIARRHOEA:", feeding: "FEEDING:", treatment_0_59d: "TREATMENT/COUNSEL:" };
 const getClassListImnci = (age, d) => (age === "GE2M_LE5Y" ? CLASS_2_59M[d] : CLASS_0_59D[d]) || [];
-
 const JOB_TITLES_IMNCI = ["Pediatric Doctor", "Family Medicine Doctor", "General Practioner", "Medical Assistance", "Treating Nurse", "Other"];
 const JOB_TITLES_ETAT = ["Pediatric Specialist", "Pediatric registrar", "Family Medicine Doctor", "Emergency doctor", "General Practioner", "Nurse Diploma", "Nurse Bachelor", "Other"];
 const JOB_TITLES_EENC = ["Pediatric doctor", "Obstetric Doctor", "Emergency doctor", "General Practioner", "Nurse Diploma", "Nurse Bachelor", "Sister Midwife", "Midwife", "Other"];
@@ -162,6 +78,8 @@ const JOB_TITLES_EENC = ["Pediatric doctor", "Obstetric Doctor", "Emergency doct
 const calcPct = (c, s) => (!s ? NaN : (c * 100) / s);
 const fmtPct = v => (!isFinite(v) ? "—" : Math.round(v).toFixed(0) + " %");
 const pctBgClass = v => (!isFinite(v) ? "" : v < 50 ? "bg-red-100 text-red-800" : v <= 80 ? "bg-yellow-100 text-yellow-800" : "bg-green-100 text-green-800");
+const formatAsPercentageAndCount = (correct, total) => `${correct}/${total} (${fmtPct(calcPct(correct, total))})`;
+const formatAsPercentageAndScore = (score, maxScore) => maxScore === 0 ? "N/A" : `${score}/${maxScore} (${fmtPct(calcPct(score, maxScore))})`;
 
 // --- PDF Export Helper ---
 const exportToPdf = (title, head, body, fileName, orientation = 'portrait') => {
@@ -175,6 +93,126 @@ const exportToPdf = (title, head, body, fileName, orientation = 'portrait') => {
         headStyles: { fillColor: [8, 145, 178] },
     });
     doc.save(`${fileName}.pdf`);
+};
+
+// MODIFIED: Generates a portrait PDF for detailed reports
+const generateDetailedReportPdf = (reportData, courseType, age, scenario, participants, dayFilter, groupFilter) => {
+    const doc = new jsPDF('portrait');
+    doc.setFontSize(10);
+
+    const isEENC = courseType === 'EENC';
+
+    const getAgeLabel = () => {
+        if (courseType === 'IMNCI') return `Age Group: ${age === 'LT2M' ? '0-59 days' : '2-59 months'}`;
+        if (courseType === 'ETAT') return `Report Type: ETAT`;
+        if (courseType === 'EENC') return `Scenario: ${scenario === 'breathing' ? 'Breathing Baby' : 'Not Breathing Baby'}`;
+        return '';
+    };
+
+    const generateTable = (groupName, tableHead, tableBody, pageTitle, startY = 15) => {
+        if (tableBody.length === 0) return startY;
+        
+        if (startY + 30 > doc.internal.pageSize.height) { // Check for space for title and table
+            doc.addPage();
+            startY = 15;
+        }
+
+        doc.setFontSize(10);
+        doc.text(pageTitle, 14, startY);
+        doc.setFontSize(8);
+        doc.text(`Group: ${groupName} | Filters: Day ${dayFilter}, Group ${groupFilter}`, 14, startY + 5);
+
+        autoTable(doc, {
+            head: tableHead,
+            body: tableBody,
+            startY: startY + 10,
+            theme: 'grid',
+            headStyles: { fillColor: [8, 145, 178], fontStyle: 'bold' },
+            styles: { fontSize: 6, cellPadding: 1, overflow: 'linebreak' },
+            columnStyles: {
+                0: { cellWidth: 40 }, // Classification column
+            },
+            didDrawCell: (data) => {
+                if (data.column.index > 0 && data.cell.text.toString().includes('(')) {
+                    const percentage = parseFloat(data.cell.text.toString().match(/\((\d+)\s*%\)/)?.[1]);
+                    let color = [255, 255, 255];
+                    if (percentage < 50) color = [254, 226, 226]; // bg-red-100
+                    else if (percentage <= 80) color = [254, 243, 199]; // bg-yellow-100
+                    else color = [220, 252, 231]; // bg-green-100
+                    doc.setFillColor(...color);
+                    doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+                    doc.setTextColor(51);
+                    doc.text(data.cell.text, data.cell.x + data.cell.padding('left'), data.cell.y + data.cell.height / 2, { align: 'left', baseline: 'middle' });
+                }
+            }
+        });
+        return doc.lastAutoTable.finalY + 15;
+    };
+
+    const groupsToRender = groupFilter === 'All' ? ['Group A', 'Group B', 'Group C', 'Group D'] : [groupFilter];
+
+    let finalY = 15;
+    groupsToRender.forEach(g => {
+        const parts = participants.filter(p => p.group === g).sort((a, b) => a.name.localeCompare(b.name));
+        if (parts.length === 0) return;
+
+        let tableHead = [['Classification', ...parts.map(p => p.name)]];
+        let tableBody = [];
+
+        if (isEENC) {
+            const scenariosToRender = (scenario === 'All') ? ['breathing', 'not_breathing'] : [scenario];
+            scenariosToRender.forEach(s => {
+                const skillsMap = s === 'breathing' ? SKILLS_EENC_BREATHING : SKILLS_EENC_NOT_BREATHING;
+                const labelsMap = s === 'breathing' ? EENC_DOMAIN_LABEL_BREATHING : EENC_DOMAIN_LABEL_NOT_BREATHING;
+                
+                tableBody.push([{ content: `${s === 'breathing' ? 'Breathing Baby' : 'Not Breathing Baby'}`, colSpan: parts.length + 1, styles: { fontStyle: 'bold', fillColor: '#e0e0e0' } }]);
+
+                Object.keys(skillsMap).forEach(domain => {
+                    tableBody.push([{ content: labelsMap[domain], colSpan: parts.length + 1, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
+                    skillsMap[domain].forEach(skill => {
+                        const participantCells = parts.map(p => {
+                            const skillObs = reportData.filter(o => o.participant_id === p.id && o.item_recorded === skill.text && o.age_group === `EENC_${s}`);
+                            const totalScore = skillObs.reduce((acc, o) => acc + o.item_correct, 0);
+                            const maxScore = skillObs.length * 2;
+                            return formatAsPercentageAndScore(totalScore, maxScore);
+                        });
+                        tableBody.push([skill.text, ...participantCells]);
+                    });
+                });
+            });
+        } else if (courseType === 'IMNCI') {
+            const domains = DOMAINS_BY_AGE_IMNCI[age];
+            for (const d of domains) {
+                tableBody.push([{ content: DOMAIN_LABEL_IMNCI[d], colSpan: parts.length + 1, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
+                const items = getClassListImnci(age, d) || [];
+                for (const item of items) {
+                    const participantCells = parts.map(p => {
+                        const allObsForSkill = reportData.filter(o => o.participant_id === p.id && o.item_recorded === item);
+                        const correctCount = allObsForSkill.filter(o => o.item_correct === 1).length;
+                        return formatAsPercentageAndCount(correctCount, allObsForSkill.length);
+                    });
+                    tableBody.push([item, ...participantCells]);
+                }
+            }
+        } else if (courseType === 'ETAT') {
+            for (const domain in SKILLS_ETAT) {
+                tableBody.push([{ content: ETAT_DOMAIN_LABEL[domain], colSpan: parts.length + 1, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
+                for (const skill of SKILLS_ETAT[domain]) {
+                    const participantCells = parts.map(p => {
+                        const allObsForSkill = reportData.filter(o => o.participant_id === p.id && o.item_recorded === skill);
+                        const correctCount = allObsForSkill.filter(o => o.item_correct === 1).length;
+                        return formatAsPercentageAndCount(correctCount, allObsForSkill.length);
+                    });
+                    tableBody.push([skill, ...participantCells]);
+                }
+            }
+        }
+
+        if (finalY + 20 > doc.internal.pageSize.height) { doc.addPage(); finalY = 15; }
+        finalY = generateTable(g, tableHead, tableBody, getAgeLabel(), finalY);
+    });
+
+    doc.save(`Detailed_Report_${courseType}.pdf`);
 };
 
 const generateCoursePdf = (course, participants, allCases, allObs) => {
@@ -217,7 +255,7 @@ const generateCoursePdf = (course, participants, allCases, allObs) => {
     const performanceSummary = participants.map(p => {
         const pCases = allCases.filter(c => c.participant_id === p.id);
         const pObs = allObs.filter(o => o.participant_id === p.id);
-        const correctObs = pObs.filter(o => o.item_correct > 0).length;
+        const correctObs = pObs.filter(o => o.item_correct > 0).length; // EENC partial counts as correct here
         return { name: p.name, group: p.group, cases: pCases.length, skills: pObs.length, correct: fmtPct(calcPct(correctObs, pObs.length)) };
     });
     const performanceHead = [['Name', 'Group', 'Cases Seen', 'Skills Recorded', '% Correct']];
@@ -423,9 +461,10 @@ const Button = ({ onClick, children, variant = 'primary', disabled = false, clas
     const disabledClasses = "disabled:opacity-50 disabled:cursor-not-allowed";
     return <button onClick={onClick} disabled={disabled} className={`${baseClasses} ${variantClasses[variant]} ${disabledClasses} ${className}`}>{children}</button>;
 };
-const FormGroup = ({ label, children }) => (<div className="flex flex-col gap-1"><label className="font-semibold text-gray-700 text-sm">{label}</label>{children}</div>);
+const FormGroup = ({ label, children, hint }) => (<div className="flex flex-col gap-1"><label className="font-semibold text-gray-700 text-sm">{label}</label>{children}{hint && <p className="text-xs text-gray-500">{hint}</p>}</div>);
 const Input = (props) => <input {...props} className={`border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${props.className || ''}`} />;
 const Select = (props) => <select {...props} className={`border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${props.className || ''}`}>{props.children}</select>;
+const Textarea = (props) => <textarea {...props} className={`border border-gray-300 rounded-md p-2 w-full focus:ring-2 focus:ring-sky-500 focus:border-sky-500 ${props.className || ''}`} />;
 const Table = ({ headers, children }) => (
     <div className="overflow-x-auto border border-gray-200 rounded-lg">
         <table className="min-w-full text-sm border-collapse">
@@ -689,36 +728,93 @@ function CourseReportView({ course, onBack }) {
     );
 }
 
-function CourseForm({ courseType, initialData, onCancel, onSave }) {
+function CourseForm({ courseType, initialData, facilitatorsList, onCancel, onSave, onAddNewFacilitator }) {
     const [state, setState] = useState(initialData?.state || '');
     const [locality, setLocality] = useState(initialData?.locality || '');
     const [hall, setHall] = useState(initialData?.hall || '');
     const [startDate, setStartDate] = useState(initialData?.start_date || '');
+    const [courseDuration, setCourseDuration] = useState(initialData?.course_duration || 7);
     const [coordinator, setCoordinator] = useState(initialData?.coordinator || '');
     const [participantsCount, setParticipantsCount] = useState(initialData?.participants_count || 0);
     const [director, setDirector] = useState(initialData?.director || '');
     const [clinical, setClinical] = useState(initialData?.clinical_instructor || '');
     const [supporter, setSupporter] = useState(initialData?.funded_by || '');
-    const [facilitators, setFacilitators] = useState(initialData?.facilitators || ['', '']);
+
+    const initialFacilitators = useMemo(() => {
+        if (initialData?.facilitators?.length > 0) {
+            return initialData.facilitators.map(name => {
+                const assignment = initialData.facilitatorAssignments?.find(a => a.name === name);
+                return {
+                    name,
+                    group: assignment?.group || 'Group A',
+                    imci_sub_type: assignment?.imci_sub_type || 'Standard 7 days course',
+                };
+            });
+        }
+        return [{ name: '', group: 'Group A', imci_sub_type: 'Standard 7 days course' }];
+    }, [initialData]);
+
+    const [facilitators, setFacilitators] = useState(initialFacilitators);
     const [error, setError] = useState('');
 
-    const addFac = () => setFacilitators(f => [...f, '']);
-    const removeFac = (i) => setFacilitators(f => f.length <= 2 ? f : f.filter((_, idx) => idx !== i));
-    const setFac = (i, v) => setFacilitators(f => f.map((x, idx) => idx === i ? v : x));
+    const [directorSearch, setDirectorSearch] = useState('');
+    const [facilitatorSearch, setFacilitatorSearch] = useState('');
+    const [clinicalInstructorSearch, setClinicalInstructorSearch] = useState('');
+
+    const isImnci = courseType === 'IMNCI';
+
+    const directorOptions = useMemo(() => {
+        return facilitatorsList
+            .filter(f => f.directorCourse === 'Yes')
+            .filter(f => !directorSearch || f.name.toLowerCase().includes(directorSearch.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [facilitatorsList, directorSearch]);
+    
+    const clinicalInstructorOptions = useMemo(() => {
+        return facilitatorsList
+            .filter(f => f.isClinicalInstructor === 'Yes' || f.directorCourse === 'Yes')
+            .filter(f => !clinicalInstructorSearch || f.name.toLowerCase().includes(clinicalInstructorSearch.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [facilitatorsList, clinicalInstructorSearch]);
+
+    const facilitatorOptions = useMemo(() => {
+        return facilitatorsList
+            .filter(f => (Array.isArray(f.courses) ? f.courses : []).includes(courseType))
+            .filter(f => !facilitatorSearch || f.name.toLowerCase().includes(facilitatorSearch.toLowerCase()))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, [facilitatorsList, courseType, facilitatorSearch]);
+
+    const addFacilitator = () => {
+        setFacilitators(f => [...f, { name: '', group: 'Group A', imci_sub_type: 'Standard 7 days course' }]);
+    };
+
+    const removeFacilitator = (index) => {
+        setFacilitators(f => f.filter((_, i) => i !== index));
+    };
+    
+    const updateFacilitator = (index, field, value) => {
+        setFacilitators(f => f.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+    };
 
     const submit = () => {
-        const facArr = facilitators.map(s => s.trim()).filter(Boolean);
-        if (!state || !locality || !hall || !coordinator || !participantsCount || !director || facArr.length < 2 || !supporter || !startDate) {
-            setError('Please complete all required fields (minimum two facilitators).'); return;
+        const selectedFacilitatorNames = facilitators.map(f => f.name).filter(Boolean);
+        if (!state || !locality || !hall || !coordinator || !participantsCount || !director || selectedFacilitatorNames.length < 2 || !supporter || !startDate) {
+            setError('Please complete all required fields (minimum two facilitators).');
+            return;
         }
 
         const payload = {
             state, locality, hall, coordinator, start_date: startDate,
+            course_duration: courseDuration,
             participants_count: participantsCount, director,
-            funded_by: supporter, facilitators: facArr
+            funded_by: supporter,
+            // Only store the names in the main course object
+            facilitators: selectedFacilitatorNames,
+            // Store detailed facilitator assignments in a new field
+            facilitatorAssignments: facilitators.filter(f => f.name).map(f => ({ name: f.name, group: f.group, imci_sub_type: f.imci_sub_type })),
         };
 
-        if (courseType === 'IMNCI') {
+        if (isImnci) {
             payload.clinical_instructor = clinical;
         }
 
@@ -734,19 +830,77 @@ function CourseForm({ courseType, initialData, onCancel, onSave }) {
                 <FormGroup label="Locality"><Select value={locality} onChange={(e) => setLocality(e.target.value)} disabled={!state}><option value="">— Select Locality —</option>{(STATE_LOCALITIES[state] || []).sort().map(l => <option key={l} value={l}>{l}</option>)}</Select></FormGroup>
                 <FormGroup label="Course Hall"><Input value={hall} onChange={(e) => setHall(e.target.value)} /></FormGroup>
                 <FormGroup label="Start Date of Course"><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></FormGroup>
+                <FormGroup label="Course Duration (days)"><Input type="number" value={courseDuration} onChange={(e) => setCourseDuration(Number(e.target.value))} /></FormGroup>
                 <FormGroup label="Course Coordinator"><Input value={coordinator} onChange={(e) => setCoordinator(e.target.value)} /></FormGroup>
                 <FormGroup label="# of Participants"><Input type="number" value={participantsCount} onChange={(e) => setParticipantsCount(Number(e.target.value))} /></FormGroup>
-                <FormGroup label="Course Director"><Input value={director} onChange={(e) => setDirector(e.target.value)} /></FormGroup>
-                {courseType === 'IMNCI' &&
-                    <FormGroup label="Clinical Instructor (Optional)"><Input value={clinical} onChange={(e) => setClinical(e.target.value)} /></FormGroup>
+                <FormGroup label="Course Director">
+                    <Select value={director} onChange={(e) => setDirector(e.target.value)}>
+                        <option value="">— Select Director —</option>
+                        {directorOptions.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                    </Select>
+                </FormGroup>
+                {isImnci &&
+                    <FormGroup label="Clinical Instructor (Optional)">
+                        <Select value={clinical} onChange={(e) => setClinical(e.target.value)}>
+                            <option value="">— Select Clinical Instructor —</option>
+                            {clinicalInstructorOptions.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                        </Select>
+                    </FormGroup>
                 }
                 <FormGroup label="Funded by:"><Input value={supporter} onChange={(e) => setSupporter(e.target.value)} /></FormGroup>
-                <FormGroup label="Facilitators"><div className="grid gap-2">{facilitators.map((v, i) => (<div key={i} className="flex gap-2"><Input value={v} onChange={(e) => setFac(i, e.target.value)} placeholder={`Facilitator ${i + 1}`} /><Button type="button" variant="secondary" onClick={() => removeFac(i)} disabled={facilitators.length <= 2}>−</Button></div>))}<Button type="button" variant="secondary" className="mt-2" onClick={addFac}>+ Add Facilitator</Button></div></FormGroup>
+                
+                {/* Updated Facilitator Section */}
+                <div className="md:col-span-2 lg:col-span-3">
+                    <FormGroup label="Facilitators and Assignments">
+                        <div className="grid gap-4">
+                            {(Array.isArray(facilitators) ? facilitators : []).map((fac, index) => (
+                                <div key={index} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center p-3 border rounded-md bg-gray-50">
+                                    <div className="col-span-1">
+                                        <Select value={fac.name} onChange={(e) => updateFacilitator(index, 'name', e.target.value)} className="w-full">
+                                            <option value="">— Select Facilitator {index + 1} —</option>
+                                            {facilitatorOptions.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                                        </Select>
+                                    </div>
+                                    <div className="col-span-1">
+                                        <Select value={fac.group} onChange={(e) => updateFacilitator(index, 'group', e.target.value)} className="w-full">
+                                            <option>Group A</option>
+                                            <option>Group B</option>
+                                            <option>Group C</option>
+                                            <option>Group D</option>
+                                        </Select>
+                                    </div>
+                                    {isImnci && (
+                                        <div className="col-span-1">
+                                            <Select value={fac.imci_sub_type} onChange={(e) => updateFacilitator(index, 'imci_sub_type', e.target.value)} className="w-full">
+                                                <option>Standard 7 days course</option>
+                                                <option>Refreshment course</option>
+                                                <option>IMNCI in humanitarian setting</option>
+                                                <option>online IMCI course</option>
+                                                <option>preservice Course</option>
+                                            </Select>
+                                        </div>
+                                    )}
+                                    <div className="col-span-1 sm:col-span-3 flex justify-end">
+                                        <Button type="button" variant="danger" onClick={() => removeFacilitator(index)} disabled={facilitators.length <= 2}>Remove</Button>
+                                    </div>
+                                </div>
+                            ))}
+                            <div className="flex gap-2 mt-2">
+                                <Button type="button" variant="secondary" onClick={addFacilitator} className="flex-grow">+ Add Facilitator</Button>
+                                <Button type="button" variant="ghost" onClick={onAddNewFacilitator} className="flex-grow">Add New to List</Button>
+                            </div>
+                        </div>
+                    </FormGroup>
+                </div>
             </div>
-            <div className="flex gap-2 justify-end mt-6 border-t pt-6"><Button variant="secondary" onClick={onCancel}>Cancel</Button><Button onClick={submit}>Save Course</Button></div>
+            <div className="flex gap-2 justify-end mt-6 border-t pt-6">
+                <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+                <Button onClick={submit}>Save Course</Button>
+            </div>
         </Card>
     );
 }
+
 
 function ParticipantsView({ course, participants, onAdd, onOpen, onEdit, onDelete, onOpenReport }) {
     const [groupFilter, setGroupFilter] = useState('All');
@@ -789,6 +943,7 @@ function ParticipantsView({ course, participants, onAdd, onOpen, onEdit, onDelet
                     ))}
                 </Table>
             </div>
+
             {/* Mobile Card View */}
             <div className="md:hidden grid gap-4">
                 {filtered.length === 0 ? (
@@ -796,9 +951,13 @@ function ParticipantsView({ course, participants, onAdd, onOpen, onEdit, onDelet
                 ) : (
                     filtered.map(p => (
                         <div key={p.id} className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
-                            <h3 className="font-bold text-lg text-gray-800">{p.name}</h3>
-                            <p className="text-gray-600">{p.job_title}</p>
-                            <p className="text-sm text-gray-500 mt-1">Group: <span className="font-medium text-gray-700">{p.group}</span></p>
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <h3 className="font-bold text-lg text-gray-800">{p.name}</h3>
+                                    <p className="text-gray-600">{p.job_title}</p>
+                                    <p className="text-sm text-gray-500 mt-1">Group: <span className="font-medium text-gray-700">{p.group}</span></p>
+                                </div>
+                            </div>
                             <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap gap-2 justify-end">
                                 <Button variant="secondary" onClick={() => onOpen(p.id)}>Monitor</Button>
                                 <Button variant="secondary" onClick={() => onOpenReport(p.id)}>Report</Button>
@@ -1147,7 +1306,7 @@ function ParticipantForm({ course, initialData, onCancel, onSave }) {
                         </Select>
                     </FormGroup>
                     <FormGroup label="Facility Type"><Select value={facilityType} onChange={(e) => setFacilityType(e.target.value)}><option value="">— Select Type —</option><option value="Health Unit">Health Unit</option><option value="Health Center">Health Center</option><option value="Rural Hospital">Rural Hospital</option><option value="Teaching Hospital">Teaching Hospital</option><option value="other">Other</option></Select></FormGroup>
-                    <FormGroup label="Previously trained in IMCI?"><Select value={trainedIMNCI} onChange={(e) => setTrainedIMNCI(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
+                    <FormGroup label="Previously trained in IMCI?"><Select value={trainedIMNCI ? 'yes' : 'no'} onChange={(e) => setTrainedIMNCI(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     {trainedIMNCI === 'yes' && <FormGroup label="Date of last training"><Input type="date" value={lastTrainIMNCI} onChange={(e) => setLastTrainIMNCI(e.target.value)} /></FormGroup>}
                     <FormGroup label="Has therapeutic nutrition service?"><Select value={hasNutri ? 'yes' : 'no'} onChange={e => setHasNutri(e.target.value === 'yes')}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     {!hasNutri && <FormGroup label="Nearest therapeutic nutrition center?"><Input value={nearestNutri} onChange={e => setNearestNutri(e.target.value)} /></FormGroup>}
@@ -1161,7 +1320,7 @@ function ParticipantForm({ course, initialData, onCancel, onSave }) {
                 {/* --- ETAT SPECIFIC FIELDS --- */}
                 {isEtat && (<>
                     <FormGroup label="Hospital Type"><Select value={hospitalTypeEtat} onChange={e => setHospitalTypeEtat(e.target.value)}><option value="">— Select Type —</option><option>Pediatric Hospital</option><option>Pediatric Department in General Hospital</option><option>Rural Hospital</option><option>other</option></Select></FormGroup>
-                    <FormGroup label="Previously trained on ETAT?"><Select value={trainedEtat} onChange={e => setTrainedEtat(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
+                    <FormGroup label="Previously trained on ETAT?"><Select value={trainedEtat ? 'yes' : 'no'} onChange={e => setTrainedEtat(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     {trainedEtat === 'yes' && <FormGroup label="Date of last ETAT training"><Input type="date" value={lastTrainEtat} onChange={(e) => setLastTrainEtat(e.target.value)} /></FormGroup>}
                     <FormGroup label="Does hospital have a current triaging system?"><Select value={hasTriageSystem ? 'yes' : 'no'} onChange={e => setHasTriageSystem(e.target.value === 'yes')}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     <FormGroup label="Does hospital have a stabilization center for malnutrition?"><Select value={hasStabilizationCenter ? 'yes' : 'no'} onChange={e => setHasStabilizationCenter(e.target.value === 'yes')}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
@@ -1174,7 +1333,7 @@ function ParticipantForm({ course, initialData, onCancel, onSave }) {
                 {isEenc && (<>
                     <FormGroup label="Hospital Type"><Select value={hospitalTypeEenc} onChange={e => setHospitalTypeEenc(e.target.value)}><option value="">— Select Type —</option><option>Comprehensive EmONC</option><option>Basic EmONC</option><option value="other">Other (specify)</option></Select></FormGroup>
                     {hospitalTypeEenc === 'other' && <FormGroup label="Specify Hospital Type"><Input value={otherHospitalTypeEenc} onChange={e => setOtherHospitalTypeEenc(e.target.value)} /></FormGroup>}
-                    <FormGroup label="Previously trained on EENC?"><Select value={trainedEENC} onChange={e => setTrainedEENC(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
+                    <FormGroup label="Previously trained on EENC?"><Select value={trainedEENC ? 'yes' : 'no'} onChange={e => setTrainedEENC(e.target.value)}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     {trainedEENC === 'yes' && <FormGroup label="Date of last EENC training"><Input type="date" value={lastTrainEENC} onChange={(e) => setLastTrainEENC(e.target.value)} /></FormGroup>}
                     <FormGroup label="Does hospital have a Special Newborn Care Unit (SNCU)?"><Select value={hasSncu ? 'yes' : 'no'} onChange={e => setHasSncu(e.target.value === 'yes')}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
                     <FormGroup label="Does hospital have an IYCF center?"><Select value={hasIycfCenter ? 'yes' : 'no'} onChange={e => setHasIycfCenter(e.target.value === 'yes')}><option value="no">No</option><option value="yes">Yes</option></Select></FormGroup>
@@ -1615,6 +1774,10 @@ function ImnciReports({ course, participants, allObs, allCases }) {
         return g;
     }, [filteredObs, participants]);
 
+    const handleExportDetailedReportPdf = () => {
+        generateDetailedReportPdf(filteredObs, course.course_type, age, null, participants, dayFilter, groupFilter);
+    };
+
     const handleExportFullReportPdf = () => {
         const doc = new jsPDF();
         const reportTitle = `IMCI Report - ${tab.replace(/^\w/, c => c.toUpperCase())}`;
@@ -1677,7 +1840,11 @@ function ImnciReports({ course, participants, allObs, allCases }) {
                     <FormGroup label="Day of Training"><Select value={dayFilter} onChange={(e) => setDayFilter(e.target.value)}><option value="All">All Days</option>{[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>Day {d}</option>)}</Select></FormGroup>
                     <FormGroup label="Group"><Select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="All">All Groups</option><option>Group A</option><option>Group B</option><option>Group C</option><option>Group D</option></Select></FormGroup>
                 </div>
-                <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Full Report as PDF</Button>
+                {tab === 'matrix' ? (
+                    <Button onClick={handleExportDetailedReportPdf}><PdfIcon /> Save Detailed Report as PDF</Button>
+                ) : (
+                    <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Summary Report as PDF</Button>
+                )}
             </div>
 
             {tab !== 'matrix' && groupsToRender.map(g => {
@@ -1757,6 +1924,10 @@ function EtatReports({ course, participants, allObs, allCases }) {
         return g;
     }, [filteredCases, participants]);
 
+    const handleExportDetailedReportPdf = () => {
+        generateDetailedReportPdf(filteredObs, course.course_type, null, null, participants, dayFilter, groupFilter);
+    };
+
     const handleExportFullReportPdf = () => {
         const doc = new jsPDF();
         const reportTitle = `ETAT Report - ${tab === 'case' ? 'Case Summary' : 'Detailed Skills'}`;
@@ -1802,14 +1973,18 @@ function EtatReports({ course, participants, allObs, allCases }) {
 
     return (
         <div className="mt-6">
-            <div className="flex flex-wrap gap-3 mb-4"><Button variant={tab === 'case' ? 'primary' : 'secondary'} onClick={() => setTab('case')}>Case Summary</Button><Button variant={tab === 'matrix' ? 'primary' : 'secondary'} onClick={() => setTab('matrix')}>Detailed Skill Report</Button></div>
+            <div className="flex flex-wrap gap-3 mb-4"><Button variant={tab === 'case' ? 'primary' : 'secondary'} onClick={() => setTab('case')}>Case Summary</Button><Button variant={tab === 'class' ? 'primary' : 'secondary'} onClick={() => setTab('class')}>Classification Summary</Button><Button variant={tab === 'matrix' ? 'primary' : 'secondary'} onClick={() => setTab('matrix')}>Detailed Report</Button></div>
 
             <div className="flex flex-wrap gap-4 items-center justify-between p-4 bg-gray-50 rounded-md mb-6">
                 <div className="flex gap-4 items-center">
                     <FormGroup label="Day of Training"><Select value={dayFilter} onChange={(e) => setDayFilter(e.target.value)}><option value="All">All Days</option>{[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>Day {d}</option>)}</Select></FormGroup>
                     <FormGroup label="Group"><Select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="All">All Groups</option><option>Group A</option><option>Group B</option><option>Group C</option><option>Group D</option></Select></FormGroup>
                 </div>
-                <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Full Report as PDF</Button>
+                {tab === 'matrix' ? (
+                    <Button onClick={handleExportDetailedReportPdf}><PdfIcon /> Save Detailed Report as PDF</Button>
+                ) : (
+                    <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Summary Report as PDF</Button>
+                )}
             </div>
 
             {tab === 'case' && groupsToRender.map(g => {
@@ -1828,32 +2003,33 @@ function EtatReports({ course, participants, allObs, allCases }) {
                 return (
                     <div key={g} className="grid gap-2 mb-8">
                         <h3 className="text-xl font-semibold">Group: {g.replace('Group ', '')}</h3>
-                        <div className="overflow-x-auto"><table className="min-w-full text-xs">
-                            <thead>
-                                <tr className="text-left border-b bg-gray-50 sticky top-0">
-                                    <th className="py-2 pr-4 w-80">Skill</th>
-                                    {parts.map(p => <th key={p.id} className="py-2 pr-4 whitespace-nowrap text-center">{p.name}</th>)}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {ETAT_DOMAINS.map(domain => (
-                                    <React.Fragment key={domain}>
-                                        <tr className="border-b">
-                                            <td colSpan={parts.length + 1} className="py-2 px-2 font-semibold bg-gray-100">{ETAT_DOMAIN_LABEL[domain]}</td>
-                                        </tr>
-                                        {SKILLS_ETAT[domain].map(skill => {
-                                            const participantCells = parts.map(p => {
-                                                const allObsForSkill = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill);
-                                                if (allObsForSkill.length === 0) return <td key={p.id} className="py-2 pr-4 text-center">N/A</td>;
-                                                const correctCount = allObsForSkill.filter(o => o.item_correct === 1).length;
-                                                const totalCount = allObsForSkill.length;
-                                                const percentage = calcPct(correctCount, totalCount);
-                                                return <td key={p.id} className={`py-2 pr-4 text-center ${pctBgClass(percentage)}`}>{`${correctCount}/${totalCount} (${fmtPct(percentage)})`}</td>;
-                                            });
-                                            return <tr key={skill} className="border-b"><td className="py-2 pl-4">{skill}</td>{participantCells}</tr>;
-                                        })}
-                                    </React.Fragment>
-                                ))}
+                        <div className="max-h-[70vh] overflow-y-auto">
+                            <table className="w-full text-xs table-fixed">
+                                <thead>
+                                    <tr className="text-left border-b bg-gray-50 sticky top-0">
+                                        <th className="py-2 pr-4 w-80">Skill</th>
+                                        {parts.map(p => <th key={p.id} className="py-2 pr-4 whitespace-nowrap text-center">{p.name}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {ETAT_DOMAINS.map(domain => (
+                                        <React.Fragment key={domain}>
+                                            <tr className="border-b">
+                                                <td colSpan={parts.length + 1} className="py-2 px-2 font-semibold bg-gray-100">{ETAT_DOMAIN_LABEL[domain]}</td>
+                                            </tr>
+                                            {SKILLS_ETAT[domain].map(skill => {
+                                                const participantCells = parts.map(p => {
+                                                    const allObsForSkill = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill);
+                                                    if (allObsForSkill.length === 0) return <td key={p.id} className="py-2 pr-4 text-center">N/A</td>;
+                                                    const correctCount = allObsForSkill.filter(o => o.item_correct === 1).length;
+                                                    const totalCount = allObsForSkill.length;
+                                                    const percentage = calcPct(correctCount, totalCount);
+                                                    return <td key={p.id} className={`py-2 pr-4 text-center ${pctBgClass(percentage)}`}>{`${correctCount}/${totalCount} (${fmtPct(percentage)})`}</td>;
+                                                });
+                                                return <tr key={skill} className="border-b"><td className="py-2 pl-4">{skill}</td>{participantCells}</tr>;
+                                            })}
+                                        </React.Fragment>
+                                    ))}
                             </tbody>
                         </table></div>
                     </div>
@@ -1923,6 +2099,10 @@ function EencReports({ course, participants, allObs, allCases }) {
         return g;
     }, [filteredCases, filteredObs, participants]);
 
+    const handleExportDetailedReportPdf = () => {
+        generateDetailedReportPdf(filteredObs, course.course_type, null, scenarioFilter, participants, dayFilter, groupFilter);
+    };
+
     const handleExportFullReportPdf = () => {
         const doc = new jsPDF('landscape');
         const reportTitle = `EENC Report - ${tab === 'summary' ? 'Score Summary' : 'Detailed Skills'}`;
@@ -1954,7 +2134,7 @@ function EencReports({ course, participants, allObs, allCases }) {
             } else { // Detailed Matrix
                 const scenariosToRender = (scenarioFilter === 'All') ? ['breathing', 'not_breathing'] : [scenarioFilter];
                 scenariosToRender.forEach(scenario => {
-                    const hasData = parts.some(p => filteredObs.some(o => o.participant_id === p.id && o.age_group === scenario));
+                    const hasData = parts.some(p => filteredObs.some(o => o.participant_id === p.id && o.age_group === `EENC_${scenario}`));
                     if (!hasData) return;
                     if (startY > 180) { doc.addPage(); startY = 20; }
                     doc.text(`${scenario === 'breathing' ? 'Breathing Baby' : 'Not Breathing Baby'}`, 14, startY);
@@ -1968,12 +2148,13 @@ function EencReports({ course, participants, allObs, allCases }) {
                         body.push([{ content: (scenario === 'breathing' ? EENC_DOMAIN_LABEL_BREATHING : EENC_DOMAIN_LABEL_NOT_BREATHING)[domain], colSpan: parts.length + 1, styles: { fontStyle: 'bold', fillColor: '#f0f0f0' } }]);
                         skillsMap[domain].forEach(skill => {
                             const participantCells = parts.map(p => {
-                                const skillObs = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill.text && o.age_group === scenario);
-                                if (skillObs.length === 0) return "N/A";
-                                const totalScore = skillObs.reduce((acc, o) => acc + o.item_correct, 0);
-                                const maxScore = skillObs.length * 2;
-                                const avgScore = (totalScore / skillObs.length).toFixed(1);
-                                return `${avgScore} (${fmtPct(calcPct(totalScore, maxScore))})`;
+                                const skillObservations = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill.text && o.age_group === `EENC_${scenario}`);
+                                if (skillObservations.length === 0) return "N/A";
+                                const totalScore = skillObservations.reduce((acc, o) => acc + o.item_correct, 0);
+                                const maxPossibleScore = skillObservations.length * 2;
+                                const percentage = calcPct(totalScore, maxPossibleScore);
+                                const avgScore = (totalScore / skillObservations.length).toFixed(1);
+                                return `${avgScore} (${fmtPct(percentage)})`;
                             });
                             body.push([skill.text, ...participantCells]);
                         });
@@ -1994,7 +2175,7 @@ function EencReports({ course, participants, allObs, allCases }) {
         const labelsMap = scenario === 'breathing' ? EENC_DOMAIN_LABEL_BREATHING : EENC_DOMAIN_LABEL_NOT_BREATHING;
 
         if (parts.length === 0) return null;
-        const hasData = parts.some(p => filteredObs.some(o => o.participant_id === p.id && o.age_group === scenario));
+        const hasData = parts.some(p => filteredObs.some(o => o.participant_id === p.id && o.age_group === `EENC_${scenario}`));
         if (!hasData && scenarioFilter !== 'All') return null;
 
         return (
@@ -2014,7 +2195,7 @@ function EencReports({ course, participants, allObs, allCases }) {
                                     <tr className="border-b"><td colSpan={parts.length + 1} className="py-2 px-2 font-semibold bg-gray-100">{labelsMap[domain]}</td></tr>
                                     {skillsMap[domain].map((skill) => {
                                         const participantCells = parts.map(p => {
-                                            const skillObservations = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill.text && o.age_group === scenario);
+                                            const skillObservations = filteredObs.filter(o => o.participant_id === p.id && o.item_recorded === skill.text && o.age_group === `EENC_${scenario}`);
                                             if (skillObservations.length === 0) return <td key={p.id} className="py-2 pr-4 text-center">N/A</td>;
                                             const totalScore = skillObservations.reduce((acc, o) => acc + o.item_correct, 0);
                                             const maxPossibleScore = skillObservations.length * 2;
@@ -2044,7 +2225,11 @@ function EencReports({ course, participants, allObs, allCases }) {
                     <FormGroup label="Day of Training"><Select value={dayFilter} onChange={(e) => setDayFilter(e.target.value)}><option value="All">All Days</option>{[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>Day {d}</option>)}</Select></FormGroup>
                     <FormGroup label="Group"><Select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="All">All Groups</option><option>Group A</option><option>Group B</option><option>Group C</option><option>Group D</option></Select></FormGroup>
                 </div>
-                <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Full Report as PDF</Button>
+                {tab === 'matrix' ? (
+                    <Button onClick={handleExportDetailedReportPdf}><PdfIcon /> Save Detailed Report as PDF</Button>
+                ) : (
+                    <Button onClick={handleExportFullReportPdf}><PdfIcon /> Save Summary Report as PDF</Button>
+                )}
             </div>
 
             {tab === 'summary' && groupsToRender.map(g => {
@@ -2115,6 +2300,529 @@ function CourseIcon({ course }) {
 
 
 // =============================================================================
+// --- Facilitator Management Components ---
+// =============================================================================
+
+function FacilitatorsView({ facilitators, onAdd, onEdit, onDelete, onOpenReport, onOpenComparison }) {
+    return (
+        <Card>
+            <PageHeader title="Manage Facilitators" actions={<Button onClick={onOpenComparison}>Compare Facilitators</Button>} />
+            <div className="mb-4">
+                <Button onClick={onAdd}>Add New Facilitator</Button>
+            </div>
+            <Table headers={["Name", "Phone", "Courses", "Actions"]}>
+                {(Array.isArray(facilitators) && facilitators.length === 0) ? <EmptyState message="No facilitators have been added yet." /> :
+                    (Array.isArray(facilitators) ? facilitators : []).map(f => (
+                        <tr key={f.id} className="hover:bg-gray-50">
+                            <td className="p-4 border">{f.name}</td>
+                            <td className="p-4 border">{f.phone}</td>
+                            <td className="p-4 border">{(Array.isArray(f.courses) ? f.courses : []).join(', ')}</td>
+                            <td className="p-4 border">
+                                <div className="flex gap-2 flex-wrap justify-end">
+                                    <Button variant="primary" onClick={() => onOpenReport(f.id)}>Report</Button>
+                                    <Button variant="secondary" onClick={() => onEdit(f)}>Edit</Button>
+                                    <Button variant="danger" onClick={() => onDelete(f.id)}>Delete</Button>
+                                </div>
+                            </td>
+                        </tr>
+                    ))
+                }
+            </Table>
+        </Card>
+    );
+}
+
+function FacilitatorForm({ initialData, onCancel, onSave }) {
+    const [name, setName] = useState(initialData?.name || '');
+    const [phone, setPhone] = useState(initialData?.phone || '');
+    const [email, setEmail] = useState(initialData?.email || '');
+    const [courses, setCourses] = useState(Array.isArray(initialData?.courses) ? initialData.courses : []);
+    const [totDates, setTotDates] = useState(initialData?.totDates || {});
+    const [currentState, setCurrentState] = useState(initialData?.currentState || '');
+    const [currentLocality, setCurrentLocality] = useState(initialData?.currentLocality || '');
+    const [directorCourse, setDirectorCourse] = useState(initialData?.directorCourse || 'No');
+    const [directorCourseDate, setDirectorCourseDate] = useState(initialData?.directorCourseDate || '');
+    const [followUpCourse, setFollowUpCourse] = useState(initialData?.followUpCourse || 'No');
+    const [followUpCourseDate, setFollowUpCourseDate] = useState(initialData?.followUpCourseDate || '');
+    const [teamLeaderCourse, setTeamLeaderCourse] = useState(initialData?.teamLeaderCourse || 'No');
+    const [teamLeaderCourseDate, setTeamLeaderCourseDate] = useState(initialData?.teamLeaderCourseDate || '');
+    const [isClinicalInstructor, setIsClinicalInstructor] = useState(initialData?.isClinicalInstructor || 'No');
+    const [comments, setComments] = useState(initialData?.comments || '');
+    const [error, setError] = useState('');
+
+    const handleCourseToggle = (course) => {
+        setCourses(prev => prev.includes(course) ? prev.filter(c => c !== course) : [...prev, course]);
+    };
+
+    const handleSubmit = () => {
+        if (!name || !phone) {
+            setError('Facilitator Name and Phone Number are required.');
+            return;
+        }
+        const payload = {
+            name, phone, email, courses, totDates, currentState, currentLocality,
+            directorCourse, directorCourseDate: directorCourse === 'Yes' ? directorCourseDate : '',
+            followUpCourse, followUpCourseDate: followUpCourse === 'Yes' ? followUpCourseDate : '',
+            teamLeaderCourse, teamLeaderCourseDate: teamLeaderCourse === 'Yes' ? teamLeaderCourseDate : '',
+            isClinicalInstructor, comments
+        };
+        onSave(payload);
+    };
+
+    return (
+        <Card>
+            <PageHeader title={initialData ? 'Edit Facilitator' : 'Add New Facilitator'} />
+            {error && <div className="p-3 mb-4 rounded-md bg-red-50 border border-red-200 text-red-800 text-sm">{error}</div>}
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <FormGroup label="Facilitator Name"><Input value={name} onChange={e => setName(e.target.value)} /></FormGroup>
+                <FormGroup label="Phone Number"><Input value={phone} onChange={e => setPhone(e.target.value)} /></FormGroup>
+                <FormGroup label="Email"><Input type="email" value={email} onChange={e => setEmail(e.target.value)} /></FormGroup>
+                <FormGroup label="Current State">
+                    <Select value={currentState} onChange={e => { setCurrentState(e.target.value); setCurrentLocality(''); }}>
+                        <option value="">— Select State —</option>
+                        {Object.keys(STATE_LOCALITIES).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                        <option value="Out of Sudan">Out of Sudan</option>
+                    </Select>
+                </FormGroup>
+                <FormGroup label="Current Locality">
+                    <Select value={currentLocality} onChange={e => setCurrentLocality(e.target.value)} disabled={!currentState || currentState === 'Out of Sudan'}>
+                        <option value="">— Select Locality —</option>
+                        {(STATE_LOCALITIES[currentState] || []).sort().map(l => <option key={l} value={l}>{l}</option>)}
+                    </Select>
+                </FormGroup>
+
+                <div className="lg:col-span-3 grid md:grid-cols-2 gap-6 border-t pt-6">
+                    <FormGroup label="Applicable Courses & ToT Dates">
+                        <div className="space-y-2">
+                            {COURSE_TYPES_FACILITATOR.map(course => (
+                                <div key={course} className="flex flex-wrap items-center gap-4 p-3 border rounded-md">
+                                    <div className="flex items-center gap-2">
+                                        <input type="checkbox" id={`course_${course}`} checked={courses.includes(course)} onChange={() => handleCourseToggle(course)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
+                                        <label htmlFor={`course_${course}`} className="font-medium w-16">{course}</label>
+                                    </div>
+                                    {courses.includes(course) && (
+                                        <div className="flex items-center gap-2 flex-grow">
+                                            <label className="text-sm">ToT Date:</label>
+                                            <Input type="date" value={totDates[course] || ''} onChange={e => setTotDates(d => ({ ...d, [course]: e.target.value }))} className="flex-grow" />
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </FormGroup>
+                </div>
+
+                <div className="lg:col-span-3 grid md:grid-cols-2 lg:grid-cols-3 gap-6 border-t pt-6">
+                    <FormGroup label="Attended IMNCI Course Director Course?"><Select value={directorCourse} onChange={e => setDirectorCourse(e.target.value)}><option>No</option><option>Yes</option></Select></FormGroup>
+                    {directorCourse === 'Yes' && <FormGroup label="Date of Course"><Input type="date" value={directorCourseDate} onChange={e => setDirectorCourseDate(e.target.value)} /></FormGroup>}
+                    <div />
+
+                    <FormGroup label="Attended IMNCI Follow-up Course?"><Select value={followUpCourse} onChange={e => setFollowUpCourse(e.target.value)}><option>No</option><option>Yes</option></Select></FormGroup>
+                    {followUpCourse === 'Yes' && <FormGroup label="Date of Course"><Input type="date" value={followUpCourseDate} onChange={e => setFollowUpCourseDate(e.target.value)} /></FormGroup>}
+                    <div />
+
+                    <FormGroup label="Attended IMNCI Team Leader Course?"><Select value={teamLeaderCourse} onChange={e => setTeamLeaderCourse(e.target.value)}><option>No</option><option>Yes</option></Select></FormGroup>
+                    {teamLeaderCourse === 'Yes' && <FormGroup label="Date of Course"><Input type="date" value={teamLeaderCourseDate} onChange={e => setTeamLeaderCourseDate(e.target.value)} /></FormGroup>}
+                    <div />
+
+                    <FormGroup label="Selected as Clinical Instructor?"><Select value={isClinicalInstructor} onChange={e => setIsClinicalInstructor(e.target.value)}><option>No</option><option>Yes</option></Select></FormGroup>
+                </div>
+
+                <div className="lg:col-span-3 border-t pt-6">
+                    <FormGroup label="Other comments from Program Manager"><Textarea rows={4} value={comments} onChange={e => setComments(e.target.value)} /></FormGroup>
+                </div>
+            </div>
+            <div className="flex gap-2 justify-end mt-6 border-t pt-6">
+                <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+                <Button onClick={handleSubmit}>Save Facilitator</Button>
+            </div>
+        </Card>
+    );
+}
+
+function FacilitatorReportView({ facilitator, allCourses, onBack }) {
+    const [loading, setLoading] = useState(true);
+    const combinedChartRef = useRef(null);
+    const imciSubcoursePieRef = useRef(null);
+
+    useEffect(() => {
+        if (allCourses.length > 0) {
+            setLoading(false);
+        }
+    }, [allCourses]);
+
+    const { directedCourses, facilitatedCourses, totalDays, combinedChartData, imciSubcourseData } = useMemo(() => {
+        if (!facilitator) return { directedCourses: [], facilitatedCourses: [], totalDays: 0, combinedChartData: {}, imciSubcourseData: {} };
+
+        const directed = allCourses.filter(c => c.director === facilitator.name);
+        const facilitated = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(facilitator.name));
+
+        const allInvolvedCourses = [...new Set([...directed, ...facilitated])];
+        const days = allInvolvedCourses.reduce((sum, course) => sum + (course.course_duration || 0), 0);
+        
+        const courseCounts = {};
+        const subcourseCounts = {};
+        COURSE_TYPES_FACILITATOR.forEach(type => { courseCounts[type] = 0; });
+        
+        allInvolvedCourses.forEach(c => {
+            if (courseCounts[c.course_type] !== undefined) {
+                courseCounts[c.course_type]++;
+            }
+        });
+        
+        allCourses.forEach(c => {
+            if (c.course_type === 'IMNCI' && Array.isArray(c.facilitatorAssignments)) {
+                c.facilitatorAssignments.forEach(fa => {
+                    if (fa.name === facilitator.name) {
+                        subcourseCounts[fa.imci_sub_type] = (subcourseCounts[fa.imci_sub_type] || 0) + 1;
+                    }
+                });
+            }
+        });
+
+        const combinedChartData = {
+            labels: Object.keys(courseCounts),
+            datasets: [{ 
+                label: '# of Courses', 
+                data: Object.values(courseCounts), 
+                backgroundColor: '#3b82f6' 
+            }]
+        };
+
+        const imciSubcourseData = {
+            labels: Object.keys(subcourseCounts),
+            datasets: [{
+                data: Object.values(subcourseCounts),
+                backgroundColor: ['#f97316', '#ef4444', '#f59e0b', '#84cc16', '#06b6d4'],
+            }]
+        };
+
+        return {
+            directedCourses: directed,
+            facilitatedCourses: facilitated,
+            totalDays: days,
+            combinedChartData,
+            imciSubcourseData
+        };
+    }, [facilitator, allCourses]);
+
+    const generateFacilitatorPdf = () => {
+        const doc = new jsPDF();
+        const fileName = `Facilitator_Report_${facilitator.name.replace(/ /g, '_')}.pdf`;
+
+        // Title
+        doc.setFontSize(22);
+        doc.text("Facilitator Report", 105, 20, { align: 'center' });
+        doc.setFontSize(18);
+        doc.text(facilitator.name, 105, 30, { align: 'center' });
+
+        let finalY = 40;
+
+        // Information Table
+        doc.setFontSize(14);
+        doc.text("Facilitator Information", 14, finalY);
+        const infoBody = [
+            ['Name', facilitator.name], ['Phone', facilitator.phone], ['Email', facilitator.email || 'N/A'],
+            ['Current Location', `${facilitator.currentState || ''} / ${facilitator.currentLocality || ''}`],
+            ...COURSE_TYPES_FACILITATOR.map(c => [
+                `${c} Facilitator`,
+                Array.isArray(facilitator.courses) && facilitator.courses.includes(c) ? `Yes (ToT: ${facilitator.totDates?.[c] || 'N/A'})` : 'No'
+            ]),
+            ['IMNCI Course Director', `${facilitator.directorCourse} ${facilitator.directorCourse === 'Yes' ? '(' + (facilitator.directorCourseDate || 'N/A') + ')' : ''}`],
+            ['IMNCI Follow-up Course', `${facilitator.followUpCourse} ${facilitator.followUpCourse === 'Yes' ? '(' + (facilitator.followUpCourseDate || 'N/A') + ')' : ''}`],
+            ['IMNCI Team Leader Course', `${facilitator.teamLeaderCourse} ${facilitator.teamLeaderCourse === 'Yes' ? '(' + (facilitator.teamLeaderCourseDate || 'N/A') + ')' : ''}`],
+            ['Clinical Instructor', facilitator.isClinicalInstructor || 'No'],
+            ['Comments', facilitator.comments || 'None']
+        ];
+        autoTable(doc, {
+            startY: finalY + 5,
+            head: [['Field', 'Details']],
+            body: infoBody,
+            theme: 'striped',
+            headStyles: { fillColor: [8, 145, 178] },
+        });
+        finalY = doc.lastAutoTable.finalY;
+
+        // Charts
+        doc.addPage();
+        finalY = 20;
+
+        const combinedChartImg = combinedChartRef.current?.canvas.toDataURL('image/png');
+        const imciPieChartImg = imciSubcoursePieRef.current?.canvas.toDataURL('image/png');
+        
+        if (combinedChartImg && imciPieChartImg) {
+            doc.setFontSize(14);
+            doc.text("Combined Courses Directed & Facilitated", 14, finalY);
+            doc.addImage(combinedChartImg, 'PNG', 14, finalY + 5, 80, 60);
+            doc.text("IMNCI Sub-course Distribution", 110, finalY);
+            doc.addImage(imciPieChartImg, 'PNG', 110, finalY + 5, 80, 60);
+            finalY += 70;
+        } else if (combinedChartImg) {
+            doc.setFontSize(14);
+            doc.text("Combined Courses Directed & Facilitated", 14, finalY);
+            doc.addImage(combinedChartImg, 'PNG', 14, finalY + 5, 180, 90);
+            finalY += 100;
+        } else if (imciPieChartImg) {
+            doc.setFontSize(14);
+            doc.text("IMNCI Sub-course Distribution", 14, finalY);
+            doc.addImage(imciPieChartImg, 'PNG', 14, finalY + 5, 180, 90);
+            finalY += 100;
+        }
+        
+
+        // Course Tables
+        if (directedCourses.length > 0) {
+            if (finalY + 30 > doc.internal.pageSize.height) { doc.addPage(); finalY = 20; }
+            autoTable(doc, {
+                startY: finalY,
+                head: [['Directed Courses', 'Date', 'Location']],
+                body: directedCourses.map(c => [c.course_type, c.start_date, c.state]),
+                didDrawPage: (data) => { doc.text("Directed Courses", 14, data.settings.margin.top - 10); }
+            });
+            finalY = doc.lastAutoTable.finalY + 10;
+        }
+
+        if (facilitatedCourses.length > 0) {
+            if (finalY + 30 > doc.internal.pageSize.height) { doc.addPage(); finalY = 20; }
+            autoTable(doc, {
+                startY: finalY,
+                head: [['Facilitated Courses', 'Date', 'Location']],
+                body: facilitatedCourses.map(c => [c.course_type, c.start_date, c.state]),
+                didDrawPage: (data) => { doc.text("Facilitated Courses", 14, data.settings.margin.top - 10); }
+            });
+        }
+
+        doc.save(fileName);
+    };
+
+    if (loading) return <Card><Spinner /></Card>;
+    if (!facilitator) return <Card><EmptyState message="Facilitator not found." /></Card>;
+
+    const chartOptions = (title) => ({
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: true, text: title } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+    });
+
+    return (
+        <div className="grid gap-6">
+            <PageHeader title="Facilitator Report" subtitle={facilitator.name} actions={<>
+                <Button onClick={generateFacilitatorPdf} variant="secondary"><PdfIcon /> Export as PDF</Button>
+                <Button onClick={onBack}>Back to List</Button>
+            </>} />
+
+            <Card>
+                <h3 className="text-xl font-bold mb-4">Facilitator Details</h3>
+                <div className="overflow-x-auto">
+                    <table className="text-sm w-full"><tbody>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50 w-1/4">Name</td><td className="p-2">{facilitator.name}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Phone</td><td className="p-2">{facilitator.phone}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Email</td><td className="p-2">{facilitator.email || 'N/A'}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Location</td><td className="p-2">{facilitator.currentState || 'N/A'}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Courses</td><td className="p-2">{(Array.isArray(facilitator.courses) ? facilitator.courses : []).join(', ')}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Course Director</td><td className="p-2">{facilitator.directorCourse === 'Yes' ? `Yes (${facilitator.directorCourseDate || 'N/A'})` : 'No'}</td></tr>
+                        <tr className="border-b"><td className="font-semibold p-2 bg-gray-50">Clinical Instructor</td><td className="p-2">{facilitator.isClinicalInstructor || 'No'}</td></tr>
+                    </tbody></table>
+                </div>
+            </Card>
+
+            <Card>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6">
+                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Courses Directed</div><div className="text-3xl font-bold text-sky-700">{directedCourses.length}</div></div>
+                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Courses Facilitated</div><div className="text-3xl font-bold text-sky-700">{facilitatedCourses.length}</div></div>
+                    <div className="p-4 bg-gray-100 rounded-lg"><div className="text-sm text-gray-600">Total Days of Training</div><div className="text-3xl font-bold text-sky-700">{totalDays}</div></div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-6 h-64">
+                    <Bar ref={combinedChartRef} options={{ ...chartOptions('Courses by Type'), stacked: false }} data={combinedChartData} />
+                    {facilitator.courses?.includes('IMNCI') && Object.keys(imciSubcourseData.labels || {}).length > 0 &&
+                        <Pie ref={imciSubcoursePieRef} options={chartOptions('IMNCI Sub-course Distribution')} data={imciSubcourseData} />
+                    }
+                </div>
+            </Card>
+
+            <div className="grid md:grid-cols-2 gap-6">
+                <Card><h3 className="text-xl font-bold mb-4">Directed Courses</h3><Table headers={["Course", "Date", "Location"]}>{directedCourses.length === 0 ? <EmptyState message="No courses directed." /> : directedCourses.map(c => (<tr key={c.id}><td className="p-2 border">{c.course_type}</td><td className="p-2 border">{c.start_date}</td><td className="p-2 border">{c.state}</td></tr>))}</Table></Card>
+                <Card><h3 className="text-xl font-bold mb-4">Facilitated Courses</h3><Table headers={["Course", "Date", "Location"]}>{facilitatedCourses.length === 0 ? <EmptyState message="No courses facilitated." /> : facilitatedCourses.map(c => (<tr key={c.id}><td className="p-2 border">{c.course_type}</td><td className="p-2 border">{c.start_date}</td><td className="p-2 border">{c.state}</td></tr>))}</Table></Card>
+            </div>
+        </div>
+    );
+}
+
+function FacilitatorComparisonView({ facilitators, allCourses, onBack }) {
+    const [viewMode, setViewMode] = useState('table');
+    const [courseFilter, setCourseFilter] = useState('All');
+    const [imciSubcourseFilter, setImciSubcourseFilter] = useState('All');
+    const [roleFilter, setRoleFilter] = useState('All');
+    const [additionalRoleFilter, setAdditionalRoleFilter] = useState('All');
+    const chartRef = useRef(null);
+
+    const filteredFacilitators = useMemo(() => {
+        return (Array.isArray(facilitators) ? facilitators : []).filter(f => {
+            const courses = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name));
+
+            // Role filter
+            if (roleFilter === 'Facilitator') {
+                const isFacilitator = courses.some(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name));
+                const isDirectorOrClinical = f.directorCourse === 'Yes' || f.isClinicalInstructor === 'Yes';
+                if (!isFacilitator || isDirectorOrClinical) return false;
+            } else if (roleFilter === 'Course Director' && f.directorCourse !== 'Yes') return false;
+            else if (roleFilter === 'Clinical Instructor' && f.isClinicalInstructor !== 'Yes') return false;
+
+            // Additional Role filter
+            if (additionalRoleFilter === 'Team Leader' && f.teamLeaderCourse !== 'Yes') return false;
+            else if (additionalRoleFilter === 'Follow-up' && f.followUpCourse !== 'Yes') return false;
+
+            // Course filter
+            if (courseFilter !== 'All') {
+                const hasCourse = courses.some(c => c.course_type === courseFilter);
+                if (!hasCourse) return false;
+            }
+            if (imciSubcourseFilter !== 'All') {
+                const hasSubcourse = courses.some(c => Array.isArray(c.facilitatorAssignments) && c.facilitatorAssignments.some(fa => fa.name === f.name && fa.imci_sub_type === imciSubcourseFilter));
+                if (!hasSubcourse) return false;
+            }
+
+            return true;
+        });
+    }, [facilitators, allCourses, courseFilter, imciSubcourseFilter, roleFilter, additionalRoleFilter]);
+
+    const comparisonData = useMemo(() => {
+        return filteredFacilitators.map(f => {
+            const directed = allCourses.filter(c => c.director === f.name && (courseFilter === 'All' || c.course_type === courseFilter));
+            const facilitated = allCourses.filter(c => Array.isArray(c.facilitators) && c.facilitators.includes(f.name) && (courseFilter === 'All' || c.course_type === courseFilter));
+            const allInvolvedCourses = [...new Set([...directed, ...facilitated])];
+            const totalDays = allInvolvedCourses.reduce((sum, c) => sum + (c.course_duration || 0), 0);
+            
+            return {
+                id: f.id, name: f.name,
+                directedCount: directed.length,
+                facilitatedCount: facilitated.length,
+                totalDays: totalDays,
+                state: f.currentState || 'N/A',
+                locality: f.currentLocality || 'N/A',
+                phone: f.phone || 'N/A',
+            };
+        }).sort((a, b) => b.totalDays - a.totalDays);
+    }, [filteredFacilitators, allCourses, courseFilter]);
+
+    const top10ChartData = useMemo(() => {
+        const top10 = comparisonData.slice(0, 10);
+        return {
+            labels: top10.map(f => f.name),
+            datasets: [{
+                label: 'Total Training Days',
+                data: top10.map(f => f.totalDays),
+                backgroundColor: '#0ea5e9'
+            }]
+        };
+    }, [comparisonData]);
+
+    const handleExportPdf = () => {
+        if (viewMode === 'table') {
+            const doc = new jsPDF('landscape');
+            const title = `Facilitator Comparison Report (Table View)`;
+            doc.text(title, 14, 15);
+    
+            const head = [['Facilitator', 'State', 'Locality', 'Phone', 'Courses Directed', 'Courses Facilitated', 'Total Days']];
+            const body = comparisonData.map(f => [
+                f.name, f.state, f.locality, f.phone,
+                f.directedCount, f.facilitatedCount, f.totalDays,
+            ]);
+    
+            autoTable(doc, { head, body, startY: 25 });
+            doc.save('Facilitator_Comparison_Table_Report.pdf');
+        } else { // chart view
+            const doc = new jsPDF('portrait');
+            const title = `Top 10 Facilitators by Training Days`;
+            doc.text(title, 14, 15);
+            
+            const chartImg = chartRef.current?.canvas.toDataURL('image/png');
+            if (chartImg) {
+                doc.addImage(chartImg, 'PNG', 14, 25, 180, 90);
+            }
+            doc.save('Facilitator_Comparison_Chart_Report.pdf');
+        }
+    };
+
+    return (
+        <Card>
+            <PageHeader
+                title="Facilitator Comparison"
+                actions={<>
+                    <Button onClick={handleExportPdf} variant="secondary"><PdfIcon /> Export as PDF</Button>
+                    <Button onClick={onBack}>Back to List</Button>
+                </>}
+            />
+            <div className="flex flex-wrap gap-3 mb-4">
+                <Button variant={viewMode === 'table' ? 'primary' : 'secondary'} onClick={() => setViewMode('table')}>Table View</Button>
+                <Button variant={viewMode === 'chart' ? 'primary' : 'secondary'} onClick={() => setViewMode('chart')}>Chart View</Button>
+            </div>
+            <div className="flex flex-wrap gap-4 items-center justify-start p-4 bg-gray-50 rounded-md mb-6">
+                <FormGroup label="Filter by Course">
+                    <Select value={courseFilter} onChange={e => setCourseFilter(e.target.value)}>
+                        <option value="All">All Courses</option>
+                        {COURSE_TYPES_FACILITATOR.map(c => <option key={c} value={c}>{c}</option>)}
+                    </Select>
+                </FormGroup>
+                {courseFilter === 'IMNCI' && (
+                    <FormGroup label="Filter by IMCI Sub-course">
+                        <Select value={imciSubcourseFilter} onChange={e => setImciSubcourseFilter(e.target.value)}>
+                            <option value="All">All Sub-courses</option>
+                            {IMNCI_SUBCOURSE_TYPES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </Select>
+                    </FormGroup>
+                )}
+                <FormGroup label="Filter by Role">
+                    <Select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+                        <option value="All">All Roles</option>
+                        <option value="Facilitator">Facilitator</option>
+                        <option value="Course Director">Course Director</option>
+                        <option value="Clinical Instructor">Clinical Instructor</option>
+                    </Select>
+                </FormGroup>
+                <FormGroup label="Filter by Additional Roles">
+                    <Select value={additionalRoleFilter} onChange={e => setAdditionalRoleFilter(e.target.value)}>
+                        <option value="All">All Roles</option>
+                        <option value="Team Leader">Team Leader</option>
+                        <option value="Follow-up">Follow-up after training</option>
+                    </Select>
+                </FormGroup>
+            </div>
+            
+            {viewMode === 'table' && (
+                <Table headers={['Facilitator', 'State', 'Locality', 'Phone', 'Courses Directed', 'Courses Facilitated', 'Total Days']}>
+                    {comparisonData.length === 0 ? <EmptyState message="No data to display." /> :
+                        comparisonData.map(f => (
+                            <tr key={f.id} className="hover:bg-gray-50 text-center">
+                                <td className="p-2 border text-left">{f.name}</td>
+                                <td className="p-2 border">{f.state}</td>
+                                <td className="p-2 border">{f.locality}</td>
+                                <td className="p-2 border">{f.phone}</td>
+                                <td className="p-2 border">{f.directedCount}</td>
+                                <td className="p-2 border">{f.facilitatedCount}</td>
+                                <td className="p-2 border font-bold">{f.totalDays}</td>
+                            </tr>
+                        ))
+                    }
+                </Table>
+            )}
+
+            {viewMode === 'chart' && (
+                <div className="grid md:grid-cols-1 gap-6 mb-6">
+                    <Card>
+                        <h3 className="text-xl font-bold mb-4">Top 10 Facilitators (by training days)</h3>
+                        <div className="h-64">
+                            <Bar ref={chartRef} options={{ responsive: true, maintainAspectRatio: false }} data={top10ChartData} />
+                        </div>
+                    </Card>
+                </div>
+            )}
+        </Card>
+    );
+}
+
+
+// =============================================================================
 // --- New Splash Screen Component ---
 // =============================================================================
 
@@ -2143,14 +2851,17 @@ const CoursesIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg
 const UsersIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
 const MonitorIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
 const ReportIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
+const FacilitatorIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+
 
 function BottomNav({ navItems, navigate }) {
     const icons = {
         Home: HomeIcon,
+        Facilitators: FacilitatorIcon,
         Courses: CoursesIcon,
         Participants: UsersIcon,
         Monitoring: MonitorIcon,
-        Reports: ReportIcon
+        Reports: ReportIcon,
     };
     return (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 flex justify-around items-center z-20">
@@ -2180,63 +2891,93 @@ export default function App() {
     const [view, setView] = useState("landing");
     const [activeCourseType, setActiveCourseType] = useState("IMNCI");
     const [courses, setCourses] = useState([]);
+    const [allCourses, setAllCourses] = useState([]);
     const [participants, setParticipants] = useState([]);
+    const [facilitators, setFacilitators] = useState([]);
     const [selectedCourseId, setSelectedCourseId] = useState(null);
     const [selectedParticipantId, setSelectedParticipantId] = useState(null);
+    const [selectedFacilitatorId, setSelectedFacilitatorId] = useState(null);
     const [editingCourse, setEditingCourse] = useState(null);
     const [editingParticipant, setEditingParticipant] = useState(null);
+    const [editingFacilitator, setEditingFacilitator] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [previousView, setPreviousView] = useState("landing");
 
-    async function refreshCourses() {
+    async function refreshAllData() {
         setLoading(true);
-        const list = await listCoursesByType(activeCourseType);
-        setCourses(list);
+        const coursesData = await listAllCourses();
+        const facilitatorsData = await listFacilitators();
+        setAllCourses(coursesData);
+        setFacilitators(facilitatorsData);
+        setCourses(coursesData.filter(c => c.course_type === activeCourseType));
         setLoading(false);
     }
+    async function refreshCourses() {
+        const list = await listCoursesByType(activeCourseType);
+        setCourses(list);
+    }
     async function refreshParticipants() {
-        if (!selectedCourseId) {
-            setParticipants([]);
-            return;
-        }
+        if (!selectedCourseId) { setParticipants([]); return; }
         setLoading(true);
         const list = await listParticipants(selectedCourseId);
         setParticipants(list);
         setLoading(false);
     }
+    async function refreshFacilitators() {
+        const list = await listFacilitators();
+        setFacilitators(list);
+    }
 
-    useEffect(() => { refreshCourses(); }, [activeCourseType]);
+    useEffect(() => { refreshAllData(); }, []); // Run once on mount
+    useEffect(() => {
+        setCourses(allCourses.filter(c => c.course_type === activeCourseType));
+    }, [activeCourseType, allCourses]);
     useEffect(() => { refreshParticipants(); }, [selectedCourseId]);
 
     const selectedCourse = useMemo(() => courses.find(c => c.id === selectedCourseId) || null, [courses, selectedCourseId]);
+    const selectedFacilitator = useMemo(() => facilitators.find(f => f.id === selectedFacilitatorId) || null, [facilitators, selectedFacilitatorId]);
 
-    const handleEditCourse = (course) => { setEditingCourse(course); setView('courseForm'); };
     const handleDeleteCourse = async (courseId) => {
         if (window.confirm('Are you sure you want to delete this course and all its data? This cannot be undone.')) {
             await deleteCourse(courseId);
-            await refreshCourses();
+            await refreshAllData();
             if (selectedCourseId === courseId) {
                 setSelectedCourseId(null);
                 setSelectedParticipantId(null);
-                setView('courses');
+                navigate('courses');
             }
         }
     };
-    const handleEditParticipant = (participant) => { setEditingParticipant(participant); setView('participantForm'); };
     const handleDeleteParticipant = async (participantId) => {
         if (window.confirm('Are you sure you want to delete this participant and all their data?')) {
             await deleteParticipant(participantId);
             await refreshParticipants();
             if (selectedParticipantId === participantId) {
                 setSelectedParticipantId(null);
-                setView('participants');
+                navigate('participants');
             }
         }
     };
+    const handleDeleteFacilitator = async (facilitatorId) => {
+        if (window.confirm('Are you sure you want to delete this facilitator?')) {
+            await deleteFacilitator(facilitatorId);
+            await refreshFacilitators();
+            navigate('facilitators');
+        }
+    };
 
-    const navigate = (newView) => {
+    const navigate = (newView, state = {}) => {
+        setPreviousView(view);
         setEditingCourse(null);
         setEditingParticipant(null);
-        if (newView === 'landing' || newView === 'courses') {
+        setEditingFacilitator(null);
+
+        if (state.editCourse) setEditingCourse(state.editCourse);
+        if (state.editParticipant) setEditingParticipant(state.editParticipant);
+        if (state.editFacilitator) setEditingFacilitator(state.editFacilitator);
+        if (state.openFacilitatorReport) setSelectedFacilitatorId(state.openFacilitatorReport);
+
+        if (['landing', 'courses', 'facilitators', 'facilitatorComparison'].includes(newView)) {
             setSelectedCourseId(null);
             setSelectedParticipantId(null);
         }
@@ -2244,9 +2985,6 @@ export default function App() {
             if (newView !== 'observe' && newView !== 'participantReport') {
                 setSelectedParticipantId(null);
             }
-        }
-        if (newView === 'courses' || newView === 'landing') {
-            setSelectedCourseId(null);
         }
 
         setView(newView);
@@ -2257,28 +2995,32 @@ export default function App() {
         if (loading && view !== 'landing') return <Card><Spinner /></Card>;
         switch (view) {
             case 'landing': return <Landing active={activeCourseType} onPick={(t) => { setActiveCourseType(t); navigate('courses'); }} />;
-            case 'courses': return <CoursesView courses={courses.filter(c => c.course_type === activeCourseType)} onAdd={() => navigate('courseForm')} onOpen={(id) => { setSelectedCourseId(id); navigate('participants'); }} onEdit={handleEditCourse} onDelete={handleDeleteCourse} onOpenReport={(id) => { setSelectedCourseId(id); navigate('courseReport'); }} />;
-            case 'courseForm': return <CourseForm courseType={activeCourseType} initialData={editingCourse} onCancel={() => navigate('courses')} onSave={async (payload) => { const id = await upsertCourse({ ...payload, id: editingCourse?.id, course_type: activeCourseType }); await refreshCourses(); setSelectedCourseId(id); navigate('participants'); }} />;
-            case 'participants': return selectedCourse && <ParticipantsView course={selectedCourse} participants={participants.filter(p => p.courseId === selectedCourseId)} onAdd={() => navigate('participantForm')} onOpen={(pid) => { setSelectedParticipantId(pid); navigate('observe'); }} onEdit={handleEditParticipant} onDelete={handleDeleteParticipant} onOpenReport={(pid) => { setSelectedParticipantId(pid); navigate('participantReport'); }} />;
+            case 'courses': return <CoursesView courses={courses} onAdd={() => navigate('courseForm')} onOpen={(id) => { setSelectedCourseId(id); navigate('participants'); }} onEdit={(c) => navigate('courseForm', { editCourse: c })} onDelete={handleDeleteCourse} onOpenReport={(id) => { setSelectedCourseId(id); navigate('courseReport'); }} />;
+            case 'courseForm': return <CourseForm courseType={activeCourseType} initialData={editingCourse} facilitatorsList={facilitators} onCancel={() => navigate(previousView === 'facilitatorForm' ? 'courses' : previousView)} onSave={async (payload) => { const id = await upsertCourse({ ...payload, id: editingCourse?.id, course_type: activeCourseType }); await refreshAllData(); setSelectedCourseId(id); navigate('participants'); }} onAddNewFacilitator={() => navigate('facilitatorForm')} />;
+            case 'participants': return selectedCourse && <ParticipantsView course={selectedCourse} participants={participants.filter(p => p.courseId === selectedCourseId)} onAdd={() => navigate('participantForm')} onOpen={(pid) => { setSelectedParticipantId(pid); navigate('observe'); }} onEdit={(p) => navigate('participantForm', { editParticipant: p })} onDelete={handleDeleteParticipant} onOpenReport={(pid) => { setSelectedParticipantId(pid); navigate('participantReport'); }} />;
             case 'participantForm': return selectedCourse && <ParticipantForm course={selectedCourse} initialData={editingParticipant} onCancel={() => navigate('participants')} onSave={async (p) => { await upsertParticipant({ ...p, id: editingParticipant?.id, courseId: selectedCourse.id }); await refreshParticipants(); navigate('participants'); }} />;
             case 'observe': return selectedCourse && currentParticipant && <ObservationView course={selectedCourse} participant={currentParticipant} participants={participants.filter(p => p.courseId === selectedCourseId)} onChangeParticipant={(id) => setSelectedParticipantId(id)} />;
             case 'reports': return selectedCourse && <ReportsView course={selectedCourse} participants={participants.filter(p => p.courseId === selectedCourse.id)} />;
             case 'participantReport': return selectedCourse && currentParticipant && <ParticipantReportView course={selectedCourse} participant={currentParticipant} participants={participants.filter(p => p.courseId === selectedCourseId)} onChangeParticipant={(pid) => setSelectedParticipantId(pid)} onBack={() => navigate('participants')} />;
             case 'courseReport': return selectedCourse && <CourseReportView course={selectedCourse} onBack={() => navigate('courses')} />;
+            case 'facilitators': return <FacilitatorsView facilitators={facilitators} onAdd={() => navigate('facilitatorForm')} onEdit={(f) => navigate('facilitatorForm', { editFacilitator: f })} onDelete={handleDeleteFacilitator} onOpenReport={(fid) => navigate('facilitatorReport', { openFacilitatorReport: fid })} onOpenComparison={() => navigate('facilitatorComparison')} />;
+            case 'facilitatorForm': return <FacilitatorForm initialData={editingFacilitator} onCancel={() => navigate(previousView === 'facilitatorForm' ? 'courseForm' : 'facilitators')} onSave={async (payload) => { await upsertFacilitator({ ...payload, id: editingFacilitator?.id }); await refreshFacilitators(); navigate(previousView === 'courseForm' ? 'courseForm' : 'facilitators'); }} />;
+            case 'facilitatorReport': return selectedFacilitator && <FacilitatorReportView facilitator={selectedFacilitator} allCourses={allCourses} onBack={() => navigate('facilitators')} />;
+            case 'facilitatorComparison': return <FacilitatorComparisonView facilitators={facilitators} allCourses={allCourses} onBack={() => navigate('facilitators')} />;
+
             default: return <Landing active={activeCourseType} onPick={(t) => { setActiveCourseType(t); navigate('courses'); }} />;
         }
     };
 
     const navItems = [
         { label: 'Home', view: 'landing', active: view === 'landing' },
+        { label: 'Facilitators', view: 'facilitators', active: ['facilitators', 'facilitatorForm', 'facilitatorReport', 'facilitatorComparison'].includes(view) },
         { label: 'Courses', view: 'courses', active: ['courses', 'courseForm', 'courseReport'].includes(view) },
         { label: 'Participants', view: 'participants', disabled: !selectedCourse, active: ['participants', 'participantForm', 'participantReport'].includes(view) },
         { label: 'Monitoring', view: 'observe', disabled: !selectedCourse || !selectedParticipantId, active: view === 'observe' },
         { label: 'Reports', view: 'reports', disabled: !selectedCourse, active: view === 'reports' }
     ];
 
-    // On initial load, the view is 'landing' and loading is 'true'.
-    // In this specific case, show the splash screen to prevent white flash.
     if (view === 'landing' && loading) {
         return <SplashScreen />;
     }
