@@ -32,7 +32,17 @@ export async function uploadFile(file) {
         throw error;
     }
 }
+// --- ADMIN & USERS ---
+export async function listUsers() {
+    const querySnapshot = await getDocs(collection(db, "users"));
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
 
+export async function updateUserAccess(userId, module, newAccess) {
+    const userRef = doc(db, "users", userId);
+    await setDoc(userRef, { access: { [module]: newAccess } }, { merge: true });
+    return true;
+}
 
 // --- FACILITATORS ---
 export async function upsertFacilitator(payload) {
@@ -59,6 +69,24 @@ export async function deleteFacilitator(facilitatorId) {
     return true;
 }
 
+export async function listAllParticipants() {
+    const allCourses = await listAllCourses();
+    const allParticipants = [];
+
+    for (const course of allCourses) {
+        const participants = await listParticipants(course.id);
+        // Enrich participants with course details before pushing
+        participants.forEach(p => {
+            allParticipants.push({
+                ...p,
+                course_type: course.course_type,
+                state: course.state,
+                locality: course.locality
+            });
+        });
+    }
+    return allParticipants;
+}
 
 // --- COURSES ---
 export async function upsertCourse(payload) {

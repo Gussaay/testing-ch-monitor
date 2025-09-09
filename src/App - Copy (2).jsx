@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Bar, Pie } from 'react-chartjs-2';
@@ -11,10 +11,13 @@ import { FacilitatorsView, FacilitatorReportView, FacilitatorForm } from './comp
 import { CoursesView, CourseForm, CourseReportView } from './components/Course';
 import { ObservationView } from './components/MonitoringView';
 import { ReportsView } from './components/ReportsView';
-import { AdminDashboard } from './components/AdminDashboard';
 
 // Corrected consolidated import for all participant components
 import { ParticipantsView, ParticipantForm, ParticipantReportView } from './components/ParticipantView';
+
+// New import for the Accessibility Dashboard
+import AccessibilityDashboard from "./components/AccessibilityDashboard";
+
 
 // Import all data functions
 import {
@@ -45,20 +48,18 @@ import {
     calcPct, fmtPct, pctBgClass, formatAsPercentageAndCount, formatAsPercentageAndScore
 } from './components/constants.js';
 
+
 // Import CommonComponents for shared UI elements
 import {
     Card, PageHeader, Button, FormGroup, Input, Select, Textarea, Table,
     EmptyState, Spinner, PdfIcon, CourseIcon, Footer
 } from './components/CommonComponents';
 
-// --- Firebase Imports ---
-import { auth, db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 /** =============================================================================
  * National Child Health Program - Courses Monitoring System (Firebase Version)
  * ============================================================================ */
+
 
 // =============================================================================
 // --- VIEW COMPONENTS ---
@@ -102,6 +103,8 @@ const UsersIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" 
 const MonitorIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
 const ReportIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
 const FacilitatorIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+const AccessibilityIcon = (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M22 12c0-1.85-1.12-3.46-2.84-4.14"></path><path d="M12 2a10 10 0 0 0-2 2"></path><path d="M12 22a10 10 0 0 1 2-2"></path><path d="M16 12a4 4 0 0 0-4-4v4"></path></svg>
+
 
 function BottomNav({ navItems, navigate }) {
     const icons = {
@@ -112,6 +115,7 @@ function BottomNav({ navItems, navigate }) {
         Participants: UsersIcon,
         Monitoring: MonitorIcon,
         Reports: ReportIcon,
+        Accessibility: AccessibilityIcon,
     };
     return (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 flex justify-around items-center z-20">
@@ -154,6 +158,7 @@ function SplashScreen() {
     );
 }
 
+
 // =============================================================================
 // Root App Component
 // =============================================================================
@@ -173,66 +178,20 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [previousView, setPreviousView] = useState("dashboard");
     const [allParticipants, setAllParticipants] = useState([]);
-    const [isAdmin, setIsAdmin] = useState(false);
-    const [user, setUser] = useState(null);
-
-    useEffect(() => {
-        const checkAdmin = async (user) => {
-            if (user) {
-                try {
-                    // Get the ID token result which contains claims
-                    const idTokenResult = await user.getIdTokenResult();
-                    const hasAdminClaim = idTokenResult.claims.admin || false;
-                    
-                    // Also check Firestore as a fallback
-                    const userRef = doc(db, "users", user.uid);
-                    const userSnap = await getDoc(userRef);
-                    const isAdminInFirestore = userSnap.exists() ? userSnap.data().isAdmin || false : false;
-                    
-                    // Set admin status based on claims (preferred) or Firestore
-                    setIsAdmin(hasAdminClaim || isAdminInFirestore);
-                    
-                    // Update Firestore user document if needed
-                    if (!userSnap.exists()) {
-                        await setDoc(userRef, {
-                            email: user.email,
-                            lastLogin: new Date(),
-                            isAdmin: hasAdminClaim,
-                            access: { 'IMNCI': true, 'ETAT': true, 'EENC': true, 'IPC (Neonatal Unit)': true, 'Small & Sick Newborn': false }
-                        });
-                    } else if (userSnap.data().isAdmin !== hasAdminClaim) {
-                        // Sync Firestore with claims
-                        await setDoc(userRef, { isAdmin: hasAdminClaim }, { merge: true });
-                    }
-                } catch (error) {
-                    console.error("Error checking admin status:", error);
-                    setIsAdmin(false);
-                }
-            } else {
-                setIsAdmin(false);
-            }
-        };
-
-        const unsubscribe = onAuthStateChanged(auth, user => {
-            setUser(user);
-            if (user) {
-                checkAdmin(user);
-            } else {
-                setIsAdmin(false);
-            }
-        });
-
-        return () => unsubscribe();
-    }, []);
 
     async function refreshAllData() {
         setLoading(true);
+        // Use Promise.all to fetch data concurrently for better performance
         const [coursesData, facilitatorsData, allParticipantsData] = await Promise.all([
             listAllCourses(),
             listFacilitators(),
             listAllParticipants(),
         ]);
+
+        // Create a map to easily look up course type by course ID
         const courseMap = new Map(coursesData.map(c => [c.id, c]));
+
+        // Augment each participant with their course type and course ID
         const participantsWithCourseInfo = allParticipantsData.map(p => {
             const course = courseMap.get(p.courseId);
             return {
@@ -245,10 +204,11 @@ export default function App() {
 
         setAllCourses(coursesData);
         setFacilitators(facilitatorsData);
-        setAllParticipants(participantsWithCourseInfo);
+        setAllParticipants(participantsWithCourseInfo); // Use the augmented data
         setCourses(coursesData.filter(c => c.course_type === activeCourseType));
         setLoading(false);
     }
+
     
     async function refreshCourses() {
         const list = await listCoursesByType(activeCourseType);
@@ -266,13 +226,14 @@ export default function App() {
         setFacilitators(list);
     }
 
-    useEffect(() => { refreshAllData(); }, []);
+    useEffect(() => { refreshAllData(); }, []); // Run once on mount
     useEffect(() => {
         setCourses(allCourses.filter(c => c.course_type === activeCourseType));
     }, [activeCourseType, allCourses]);
     useEffect(() => { refreshParticipants(); }, [selectedCourseId]);
 
     const selectedCourse = useMemo(() => {
+        // Find the course from allCourses, not the filtered courses
         return allCourses.find(c => c.id === selectedCourseId) || null;
     }, [allCourses, selectedCourseId]);
     const selectedFacilitator = useMemo(() => facilitators.find(f => f.id === selectedFacilitatorId) || null, [facilitators, selectedFacilitatorId]);
@@ -319,10 +280,11 @@ export default function App() {
         if (state.openCourseReport) setSelectedCourseId(state.openCourseReport);
         if (state.openParticipantReport) {
             setSelectedParticipantId(state.openParticipantReport);
+            // This is the key fix: setting the selectedCourseId
             setSelectedCourseId(state.openCourseReport);
         }
 
-        if (['landing', 'courses', 'facilitators', 'dashboard', 'admin'].includes(newView)) {
+        if (['landing', 'courses', 'facilitators', 'dashboard', 'accessibility'].includes(newView)) {
             setSelectedCourseId(null);
             setSelectedParticipantId(null);
         }
@@ -334,19 +296,6 @@ export default function App() {
 
         setView(newView);
     };
-
-    const handleLogout = async () => {
-        try {
-            await signOut(auth);
-            setUser(null);
-            setIsAdmin(false);
-            navigate('landing');
-        } catch (error) {
-            console.error("Error signing out:", error);
-        }
-    };
-
-    const modules = ['IMNCI', 'ETAT', 'EENC', 'IPC (Neonatal Unit)', 'Small & Sick Newborn'];
 
     const renderView = () => {
         const currentParticipant = participants.find(p => p.id === selectedParticipantId);
@@ -364,7 +313,6 @@ export default function App() {
             case 'facilitators': return <FacilitatorsView facilitators={facilitators} onAdd={() => navigate('facilitatorForm')} onEdit={(f) => navigate('facilitatorForm', { editFacilitator: f })} onDelete={handleDeleteFacilitator} onOpenReport={(fid) => navigate('facilitatorReport', { openFacilitatorReport: fid })} onOpenComparison={() => navigate('dashboard')} />;
             case 'facilitatorForm': return <FacilitatorForm initialData={editingFacilitator} onCancel={() => navigate(previousView === 'courseForm' ? 'courses' : 'facilitators')} onSave={async (payload) => { await upsertFacilitator({ ...payload, id: editingFacilitator?.id }); await refreshFacilitators(); navigate(previousView === 'courseForm' ? 'courseForm' : 'facilitators'); }} />;
             case 'facilitatorReport': return selectedFacilitator && <FacilitatorReportView facilitator={selectedFacilitator} allCourses={allCourses} onBack={() => navigate('facilitators')} />;
-            case 'admin': return <AdminDashboard isAdmin={isAdmin} modules={modules} />;
             case 'dashboard':
                 return <DashboardView
                     allCourses={allCourses}
@@ -377,18 +325,19 @@ export default function App() {
                     }}
                     onOpenFacilitatorReport={(id) => { setSelectedFacilitatorId(id); navigate('facilitatorReport'); }}
                 />;
+            case 'accessibility': return <AccessibilityDashboard />;
         }
     };
-    
+
     const navItems = [
         { label: 'Dashboard', view: 'dashboard', active: view === 'dashboard' },
-        { label: 'Admin', view: 'admin', active: view === 'admin', disabled: !isAdmin },
         { label: 'Home', view: 'landing', active: view === 'landing' },
         { label: 'Facilitators', view: 'facilitators', active: ['facilitators', 'facilitatorForm', 'facilitatorReport'].includes(view) },
         { label: 'Courses', view: 'courses', active: ['courses', 'courseForm', 'courseReport'].includes(view) },
         { label: 'Participants', view: 'participants', disabled: !selectedCourse, active: ['participants', 'participantForm', 'participantReport'].includes(view) },
         { label: 'Monitoring', view: 'observe', disabled: !selectedCourse || !selectedParticipantId, active: view === 'observe' },
-        { label: 'Reports', view: 'reports', disabled: !selectedCourse, active: view === 'reports' }
+        { label: 'Reports', view: 'reports', disabled: !selectedCourse, active: view === 'reports' },
+        { label: 'Accessibility', view: 'accessibility', active: view === 'accessibility' },
     ];
 
     if (view === 'landing' && loading) {
@@ -409,50 +358,20 @@ export default function App() {
                                 <p className="text-sm text-slate-300 hidden sm:block">Course Monitoring System</p>
                             </div>
                         </div>
-                        
-                        <div className="flex items-center gap-4">
-                            {user && (
-                                <div className="hidden md:flex items-center gap-2 text-slate-200">
-                                    <span>Welcome, {user.email}</span>
-                                    {isAdmin && <span className="bg-sky-600 text-xs px-2 py-1 rounded">Admin</span>}
-                                </div>
-                            )}
-                            
-                            <nav className="hidden md:flex items-center gap-1">
-                                {navItems.map(item => (
-                                    <button key={item.label} onClick={() => !item.disabled && navigate(item.view)} disabled={item.disabled}
-                                        className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${item.active
-                                                ? 'bg-sky-600 text-white'
-                                                : 'text-slate-200 hover:bg-slate-700 hover:text-white'
-                                            }`}>
-                                        {item.label}
-                                    </button>
-                                ))}
-                                
-                                {user && (
-                                    <button 
-                                        onClick={handleLogout}
-                                        className="px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-700 hover:text-white rounded-md transition-colors"
-                                    >
-                                        Logout
-                                    </button>
-                                )}
-                            </nav>
-                        </div>
+                        <nav className="hidden md:flex items-center gap-1">
+                            {navItems.map(item => (
+                                <button key={item.label} onClick={() => !item.disabled && navigate(item.view)} disabled={item.disabled}
+                                    className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${item.active
+                                            ? 'bg-sky-600 text-white'
+                                            : 'text-slate-200 hover:bg-slate-700 hover:text-white'
+                                        }`}>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </nav>
                     </div>
                 </div>
             </header>
-            
-            {/* Mobile user info */}
-            {user && (
-                <div className="md:hidden bg-slate-700 text-slate-200 p-2 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                        <span>Welcome, {user.email}</span>
-                        {isAdmin && <span className="bg-sky-600 text-xs px-2 py-1 rounded">Admin</span>}
-                    </div>
-                </div>
-            )}
-            
             <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8 w-full flex-grow mb-16 md:mb-0">
                 {renderView()}
             </main>
